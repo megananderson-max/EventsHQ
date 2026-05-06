@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Event, EventStatusBadge, EVENT_TYPE_LABELS } from './types'
 
 interface BudgetItem {
@@ -40,6 +40,12 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
   const [vendorCount, setVendorCount] = useState(0)
   const [taskStats, setTaskStats] = useState({ done: 0, total: 0 })
 
+  // Undo complete toast
+  const [completeToast, setCompleteToast] = useState(false)
+  const [pendingCompleteForm, setPendingCompleteForm] = useState<typeof form | null>(null)
+  const [previousStatus, setPreviousStatus] = useState<string | null>(null)
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     fetch(`/api/events/${event.id}/budget`).then(r => r.json()).then(setBudgetItems).catch(() => {})
     fetch(`/api/events/${event.id}/vendors`).then(r => r.json()).then((data: unknown[]) => setVendorCount(data.length)).catch(() => {})
@@ -61,22 +67,17 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
   }
   const maxPlanned = Math.max(...Object.values(categories).map(c => c.planned), 1)
 
-  const save = async () => {
-    setDateError(null)
-    setSaveError(null)
-    if (form.end_date && form.start_date && form.end_date < form.start_date) {
-      setDateError('End date must be on or after the start date.')
-      return
-    }
+  const executeSave = async (formToSave: typeof form) => {
     setSaving(true)
+    setSaveError(null)
     try {
       const res = await fetch(`/api/events/${event.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...form,
-          budget_total: parseFloat(form.budget_total) || 0,
-          expected_attendees: form.expected_attendees ? parseInt(form.expected_attendees) : null,
+          ...formToSave,
+          budget_total: parseFloat(formToSave.budget_total) || 0,
+          expected_attendees: formToSave.expected_attendees ? parseInt(formToSave.expected_attendees) : null,
         }),
       })
       if (!res.ok) throw new Error('Failed to save')
@@ -89,6 +90,45 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
     } finally {
       setSaving(false)
     }
+  }
+
+  const save = async () => {
+    setDateError(null)
+    setSaveError(null)
+    if (form.end_date && form.start_date && form.end_date < form.start_date) {
+      setDateError('End date must be on or after the start date.')
+      return
+    }
+
+    // If changing TO complete, show a 10-second undo toast before saving
+    if (form.status === 'complete' && event.status !== 'complete') {
+      setPreviousStatus(event.status)
+      setPendingCompleteForm({ ...form })
+      setCompleteToast(true)
+      setEditing(false)
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current)
+      completeTimerRef.current = setTimeout(async () => {
+        setCompleteToast(false)
+        await executeSave({ ...form })
+        setPendingCompleteForm(null)
+        setPreviousStatus(null)
+      }, 10000)
+      return
+    }
+
+    await executeSave(form)
+  }
+
+  const undoComplete = () => {
+    if (completeTimerRef.current) clearTimeout(completeTimerRef.current)
+    setCompleteToast(false)
+    // Revert form status back to previous
+    if (previousStatus !== null) {
+      setForm(f => ({ ...f, status: previousStatus }))
+    }
+    setPendingCompleteForm(null)
+    setPreviousStatus(null)
+    setEditing(true)
   }
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
@@ -279,6 +319,32 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Undo Complete Toast */}
+      {completeToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg whitespace-nowrap">
+          <span>Event marked as complete</span>
+          <span className="text-gray-500 mx-1">&middot;</span>
+          <button
+            onClick={undoComplete}
+            className="font-semibold text-blue-300 hover:text-blue-200 underline underline-offset-2"
+          >
+            Undo
+          </button>
+          <button
+            onClick={() => {
+              if (completeTimerRef.current) clearTimeout(completeTimerRef.current)
+              setCompleteToast(false)
+              if (pendingCompleteForm) executeSave(pendingCompleteForm)
+              setPendingCompleteForm(null)
+              setPreviousStatus(null)
+            }}
+            className="text-gray-400 hover:text-gray-200 ml-2"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
         </div>
       )}
     </div>

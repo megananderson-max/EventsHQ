@@ -44,6 +44,7 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
   const [customFocusInput, setCustomFocusInput]       = useState('')
   const [regions, setRegions]                         = useState<string[]>(['north_america'])
   const [customRegionInput, setCustomRegionInput]     = useState('')
+  const [yourName, setYourName]                       = useState('')
   const [saving, setSaving]                           = useState(false)
   const [loadingPrefs, setLoadingPrefs]               = useState(true)
   const [hasExistingPrefs, setHasExistingPrefs]       = useState(false)
@@ -52,6 +53,7 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
     fetch('/api/settings')
       .then(r => r.json())
       .then((s: Record<string, string>) => {
+        if (s.user_name)             setYourName(s.user_name)
         if (s.opp_company_name)      { setCompanyName(s.opp_company_name); setHasExistingPrefs(true) }
         if (s.opp_brands)            setBrands(s.opp_brands)
         if (s.opp_speaker_name)      setSpeakerName(s.opp_speaker_name)
@@ -81,7 +83,8 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       if (!res.ok) throw new Error(data.error || 'AI assist failed')
       if (data.company_name)     setCompanyName(data.company_name)
       if (data.brands)           setBrands(data.brands)
-      if (data.speaker_name)     setSpeakerName(data.speaker_name)
+      if (data.speaker_name)     { setSpeakerName(data.speaker_name); if (!yourName) setYourName(data.speaker_name) }
+      if (data.user_name)        setYourName(data.user_name)
       if (data.customer_profile) setCustomerProfile(data.customer_profile)
       if (Array.isArray(data.focus_areas) && data.focus_areas.length) setFocusAreas(data.focus_areas)
       if (Array.isArray(data.regions) && data.regions.length)         setRegions(data.regions)
@@ -101,6 +104,7 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         opp_prefs_configured: 'true',
+        user_name: yourName.trim(),
         opp_company_name: companyName.trim(),
         opp_brands: brands.trim(),
         opp_speaker_name: speakerName.trim(),
@@ -109,6 +113,35 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
         opp_regions: regions.join(','),
       }),
     })
+
+    // Create a "Me" team member if one doesn't already exist
+    if (yourName.trim()) {
+      try {
+        const existingRes = await fetch('/api/team-members')
+        if (existingRes.ok) {
+          const existingData = await existingRes.json()
+          const members = Array.isArray(existingData) ? existingData : (existingData.members ?? [])
+          const alreadyHasMe = members.some((m: { is_me?: number }) => m.is_me === 1)
+          if (!alreadyHasMe) {
+            const nameParts = yourName.trim().split(' ')
+            await fetch('/api/team-members', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                first_name: nameParts[0],
+                last_name: nameParts.slice(1).join(' ') || null,
+                email: null,
+                is_me: 1,
+                role: 'user',
+              }),
+            })
+          }
+        }
+      } catch {
+        // Non-fatal — settings were saved, team member creation is best-effort
+      }
+    }
+
     setSaving(false)
     if (isFirstTime) {
       setMode('saved')
@@ -261,6 +294,13 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
                     Pre-filled from your existing preferences — edit any field and save to update.
                   </div>
                 )}
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Your name</label>
+                  <input value={yourName} onChange={e => setYourName(e.target.value)}
+                    placeholder="e.g. Sarah Jones"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">

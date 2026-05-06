@@ -106,6 +106,10 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
   const [saving, setSaving] = useState(false)
   const [contingencyAdded, setContingencyAdded] = useState(false)
 
+  // AI budget generation
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+
   // Change 1: delete confirmation state
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
 
@@ -339,6 +343,21 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
     downloadCSV([header, ...rows], 'budget.csv')
   }
 
+  const runAiBudget = async () => {
+    setAiLoading(true)
+    setAiError(null)
+    try {
+      const res = await fetch(`/api/events/${eventId}/ai-setup`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'AI budget generation failed')
+      fetch_(false)
+    } catch (e: unknown) {
+      setAiError(e instanceof Error ? e.message : 'Unknown error')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   // Split into confirmed and estimated, then group each by category
@@ -512,12 +531,32 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
                 Export CSV
               </button>
             )}
+            <button
+              onClick={runAiBudget}
+              disabled={aiLoading}
+              className="flex items-center gap-1.5 text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-400 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+              title={items.length > 0 ? 'Add AI-generated budget estimates (new items will be added)' : 'Generate AI budget estimate for this event'}
+            >
+              {aiLoading ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  Claude is building your budget estimate… (20–40 seconds)
+                </>
+              ) : items.length === 0 ? (
+                '✨ AI Suggest Budget'
+              ) : (
+                '✨ Regenerate Budget Estimate'
+              )}
+            </button>
             <button onClick={openAdd} className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
               Add Line Item
             </button>
           </div>
         </div>
+        {aiError && (
+          <div className="mx-6 mt-3 mb-1 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{aiError}</div>
+        )}
 
         {loading ? (
           <div className="p-8 text-center text-gray-400">Loading...</div>

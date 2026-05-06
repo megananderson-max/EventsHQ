@@ -11,7 +11,6 @@ interface EventVendor {
   category: string
   contact_name: string
   contact_email: string
-  status: string
   contract_value: number | null
   notes: string | null
 }
@@ -25,14 +24,6 @@ interface Vendor {
   contact_phone: string
   website: string
   notes: string
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  rfp_sent: 'RFP Sent',
-  shortlisted: 'Shortlisted',
-  contracted: 'Contracted',
-  rejected: 'Rejected',
-  completed: 'Completed',
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -54,7 +45,7 @@ const VENDOR_CATEGORY_LABELS: Record<string, string> = {
   sponsorship: 'Sponsorship', production: 'Production', technology: 'Technology', media: 'Media', other: 'Other',
 }
 
-const EMPTY_FORM = { vendor_id: '', status: 'rfp_sent', contract_value: '', notes: '' }
+const EMPTY_FORM = { vendor_id: '', contract_value: '', notes: '' }
 const EMPTY_VENDOR_FORM = { name: '', category: 'sponsorship', contact_name: '', contact_email: '', contact_phone: '', website: '', notes: '' }
 
 export default function VendorsTab({ eventId }: { eventId: string }) {
@@ -93,7 +84,7 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
 
   const openEdit = (ev: EventVendor) => {
     setEditingId(ev.id)
-    setForm({ vendor_id: ev.vendor_id.toString(), status: ev.status, contract_value: ev.contract_value?.toString() || '', notes: ev.notes || '' })
+    setForm({ vendor_id: ev.vendor_id.toString(), contract_value: ev.contract_value?.toString() || '', notes: ev.notes || '' })
     const v = allVendors.find(x => x.id === ev.vendor_id)
     setVendorProfile(v
       ? { name: v.name, category: v.category, contact_name: v.contact_name || '', contact_email: v.contact_email || '', contact_phone: v.contact_phone || '', website: v.website || '', notes: v.notes || '' }
@@ -279,12 +270,6 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
               {/* Event-specific details */}
               <div className="space-y-4">
                 {editingId && <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Event Details</p>}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Status</label>
-                  <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                  </select>
-                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Contract Value ($)</label>
                   <input type="number" value={form.contract_value} onChange={e => setForm(f => ({ ...f, contract_value: e.target.value }))} placeholder="0" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />

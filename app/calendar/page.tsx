@@ -14,6 +14,14 @@ interface Event {
   location: string
 }
 
+interface Opportunity {
+  id: number
+  name: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+}
+
 type ViewMode = 'week' | 'month' | 'year'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -43,16 +51,30 @@ const STATUS_LABEL: Record<string, string> = {
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
-function parseDate(s: string) { return s ? new Date(s + 'T00:00:00') : null }
+/** Parse a date string (YYYY-MM-DD) into a local midnight Date without mutating anything. */
+function parseDate(s: string): Date | null { return s ? new Date(s + 'T00:00:00') : null }
+
+/** Return a timestamp for midnight of a given Date (non-mutating). */
+function midnight(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+}
 
 export default function CalendarPage() {
   const router = useRouter()
   const [events, setEvents] = useState<Event[]>([])
+  const [underReviewOpps, setUnderReviewOpps] = useState<Opportunity[]>([])
   const [view, setView] = useState<ViewMode>('month')
   const [currentDate, setCurrentDate] = useState(new Date())
 
   useEffect(() => {
     fetch('/api/events').then(r => r.json()).then(setEvents)
+    fetch('/api/opportunities')
+      .then(r => r.json())
+      .then((opps: Opportunity[]) => {
+        setUnderReviewOpps(
+          opps.filter(o => o.status === 'pending_approval' && o.start_date != null)
+        )
+      })
   }, [])
 
   const year = currentDate.getFullYear()
@@ -86,13 +108,25 @@ export default function CalendarPage() {
       })()
 
   // ── Helper: events on a given date ──────────────────────────────
-  function eventsOnDate(d: Date) {
+  // Uses midnight() to compare by day only — no date objects from state are mutated.
+  function eventsOnDate(d: Date): Event[] {
+    const dt = midnight(d)
     return events.filter(e => {
-      const s = parseDate(e.start_date), en = parseDate(e.end_date || e.start_date)
+      const s = parseDate(e.start_date)
+      const en = parseDate(e.end_date || e.start_date)
       if (!s) return false
-      const dt = new Date(d); dt.setHours(0,0,0,0)
-      s.setHours(0,0,0,0); en?.setHours(0,0,0,0)
-      return dt >= s && dt <= (en || s)
+      return dt >= midnight(s) && dt <= midnight(en || s)
+    })
+  }
+
+  // ── Helper: Under Review opportunities on a given date ──────────
+  function oppsOnDate(d: Date): Opportunity[] {
+    const dt = midnight(d)
+    return underReviewOpps.filter(o => {
+      const s = parseDate(o.start_date!)
+      const en = parseDate(o.end_date || o.start_date!)
+      if (!s) return false
+      return dt >= midnight(s) && dt <= midnight(en || s)
     })
   }
 
@@ -135,11 +169,16 @@ export default function CalendarPage() {
             <span className="text-xs text-gray-500">{label}</span>
           </div>
         ))}
+        {/* Under Review opportunities legend */}
+        <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-gray-200">
+          <div className="w-2.5 h-2.5 rounded-sm bg-amber-100 border border-dashed border-amber-300" />
+          <span className="text-xs text-gray-500">Under Review (opportunity)</span>
+        </div>
       </div>
 
-      {view === 'week' && <WeekView currentDate={currentDate} eventsOnDate={eventsOnDate} onNewEvent={d => router.push(`/events/new?date=${d}`)} />}
-      {view === 'month' && <MonthView year={year} month={month} eventsOnDate={eventsOnDate} onNewEvent={d => router.push(`/events/new?date=${d}`)} />}
-      {view === 'year' && <YearView year={year} events={events} onDrillDown={(y, m) => { setCurrentDate(new Date(y, m, 1)); setView('month') }} />}
+      {view === 'week' && <WeekView currentDate={currentDate} eventsOnDate={eventsOnDate} oppsOnDate={oppsOnDate} onNewEvent={d => router.push(`/events/new?date=${d}`)} />}
+      {view === 'month' && <MonthView year={year} month={month} eventsOnDate={eventsOnDate} oppsOnDate={oppsOnDate} onNewEvent={d => router.push(`/events/new?date=${d}`)} />}
+      {view === 'year' && <YearView year={year} events={events} underReviewOpps={underReviewOpps} onDrillDown={(y, m) => { setCurrentDate(new Date(y, m, 1)); setView('month') }} />}
     </div>
   )
 }
@@ -150,7 +189,17 @@ function getWeekStart(d: Date) {
   return start
 }
 
-function WeekView({ currentDate, eventsOnDate, onNewEvent }: { currentDate: Date; eventsOnDate: (d: Date) => Event[]; onNewEvent: (date: string) => void }) {
+/** Return a timestamp for midnight of a given Date (non-mutating). */
+function midnight(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+}
+
+function WeekView({ currentDate, eventsOnDate, oppsOnDate, onNewEvent }: {
+  currentDate: Date
+  eventsOnDate: (d: Date) => Event[]
+  oppsOnDate: (d: Date) => Opportunity[]
+  onNewEvent: (date: string) => void
+}) {
   const start = getWeekStart(currentDate)
   const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return d })
   const today = new Date(); today.setHours(0,0,0,0)
@@ -173,6 +222,7 @@ function WeekView({ currentDate, eventsOnDate, onNewEvent }: { currentDate: Date
       <div className="grid grid-cols-7 min-h-[400px]">
         {days.map(d => {
           const dayEvents = eventsOnDate(d)
+          const dayOpps = oppsOnDate(d)
           const isToday = d.toDateString() === today.toDateString()
           const dateStr = d.toISOString().slice(0, 10)
           return (
@@ -185,6 +235,17 @@ function WeekView({ currentDate, eventsOnDate, onNewEvent }: { currentDate: Date
                   <Link key={e.id} href={`/events/${e.id}`}
                     className={`block text-xs px-2 py-1 rounded border font-medium truncate hover:opacity-80 transition-opacity ${STATUS_TEXT[e.status] || 'text-gray-700 bg-gray-100 border-gray-200'} ${isContinuation ? 'opacity-75' : ''}`}>
                     {isContinuation ? '↠ ' : ''}{e.name}{isMultiDay && isStartDay ? ' →' : ''}
+                  </Link>
+                )
+              })}
+              {dayOpps.map(o => {
+                const isMultiDay = o.end_date && o.end_date !== o.start_date
+                const isStartDay = o.start_date === dateStr
+                const isContinuation = isMultiDay && !isStartDay
+                return (
+                  <Link key={`opp-${o.id}`} href="/opportunities?tab=under_review"
+                    className={`block text-xs px-2 py-1 rounded border border-dashed font-medium truncate hover:opacity-80 transition-opacity bg-amber-100 border-amber-300 text-amber-800 ${isContinuation ? 'opacity-75' : ''}`}>
+                    📋 {isContinuation ? '↠ ' : ''}{o.name}{isMultiDay && isStartDay ? ' →' : ''}
                   </Link>
                 )
               })}
@@ -203,7 +264,13 @@ function WeekView({ currentDate, eventsOnDate, onNewEvent }: { currentDate: Date
   )
 }
 
-function MonthView({ year, month, eventsOnDate, onNewEvent }: { year: number; month: number; eventsOnDate: (d: Date) => Event[]; onNewEvent: (date: string) => void }) {
+function MonthView({ year, month, eventsOnDate, oppsOnDate, onNewEvent }: {
+  year: number
+  month: number
+  eventsOnDate: (d: Date) => Event[]
+  oppsOnDate: (d: Date) => Opportunity[]
+  onNewEvent: (date: string) => void
+}) {
   const firstDay = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const cells = Array.from({ length: firstDay + daysInMonth }, (_, i) => i < firstDay ? null : i - firstDay + 1)
@@ -223,8 +290,14 @@ function MonthView({ year, month, eventsOnDate, onNewEvent }: { year: number; mo
           if (!day) return <div key={`empty-${i}`} className="border-t border-r border-gray-50 min-h-[120px] bg-gray-50/50" />
           const d = new Date(year, month, day)
           const dayEvents = eventsOnDate(d)
+          const dayOpps = oppsOnDate(d)
+          const allItems = dayEvents.length + dayOpps.length
           const isToday = d.toDateString() === today.toDateString()
           const dateStr = d.toISOString().slice(0, 10)
+          // Show up to 3 total items (events first, then opps)
+          let shownEvents = dayEvents.slice(0, 3)
+          let shownOpps = dayOpps.slice(0, Math.max(0, 3 - shownEvents.length))
+          const overflow = allItems - shownEvents.length - shownOpps.length
           return (
             <div key={day} className={`group/day border-t border-r border-gray-100 min-h-[120px] p-2 ${isToday ? 'bg-blue-50/40' : 'hover:bg-gray-50'}`}>
               <div className="flex items-center justify-between mb-1">
@@ -240,7 +313,7 @@ function MonthView({ year, month, eventsOnDate, onNewEvent }: { year: number; mo
                 </button>
               </div>
               <div className="space-y-0.5">
-                {dayEvents.slice(0, 3).map(e => {
+                {shownEvents.map(e => {
                   const isMultiDay = e.end_date && e.end_date !== e.start_date
                   const cellDateStr = new Date(year, month, day).toISOString().slice(0, 10)
                   const isStartDay = e.start_date === cellDateStr
@@ -252,7 +325,19 @@ function MonthView({ year, month, eventsOnDate, onNewEvent }: { year: number; mo
                     </Link>
                   )
                 })}
-                {dayEvents.length > 3 && <div className="text-xs text-gray-400 pl-1">+{dayEvents.length - 3} more</div>}
+                {shownOpps.map(o => {
+                  const isMultiDay = o.end_date && o.end_date !== o.start_date
+                  const cellDateStr = new Date(year, month, day).toISOString().slice(0, 10)
+                  const isStartDay = o.start_date === cellDateStr
+                  const isContinuation = isMultiDay && !isStartDay
+                  return (
+                    <Link key={`opp-${o.id}`} href="/opportunities?tab=under_review"
+                      className={`block text-xs px-1.5 py-0.5 rounded border border-dashed font-medium truncate hover:opacity-80 bg-amber-100 border-amber-300 text-amber-800 ${isContinuation ? 'opacity-75' : ''}`}>
+                      📋 {isContinuation ? '↠ ' : ''}{o.name}{isMultiDay && isStartDay ? ' →' : ''}
+                    </Link>
+                  )
+                })}
+                {overflow > 0 && <div className="text-xs text-gray-400 pl-1">+{overflow} more</div>}
               </div>
             </div>
           )
@@ -262,10 +347,29 @@ function MonthView({ year, month, eventsOnDate, onNewEvent }: { year: number; mo
   )
 }
 
-function YearView({ year, events, onDrillDown }: { year: number; events: Event[]; onDrillDown: (year: number, month: number) => void }) {
+function YearView({ year, events, underReviewOpps, onDrillDown }: {
+  year: number
+  events: Event[]
+  underReviewOpps: Opportunity[]
+  onDrillDown: (year: number, month: number) => void
+}) {
+  /** Return midnight timestamp (non-mutating). */
+  function midnightTs(d: Date): number {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  }
+
   function eventsInMonth(m: number) {
     return events.filter(e => {
       const s = parseDate(e.start_date), en = parseDate(e.end_date || e.start_date)
+      if (!s) return false
+      const mStart = new Date(year, m, 1), mEnd = new Date(year, m + 1, 0)
+      return s <= mEnd && (en || s) >= mStart
+    })
+  }
+
+  function oppsInMonth(m: number) {
+    return underReviewOpps.filter(o => {
+      const s = parseDate(o.start_date!), en = parseDate(o.end_date || o.start_date!)
       if (!s) return false
       const mStart = new Date(year, m, 1), mEnd = new Date(year, m + 1, 0)
       return s <= mEnd && (en || s) >= mStart
@@ -276,6 +380,7 @@ function YearView({ year, events, onDrillDown }: { year: number; events: Event[]
     <div className="grid grid-cols-3 gap-4">
       {MONTHS.map((name, m) => {
         const monthEvents = eventsInMonth(m)
+        const monthOpps = oppsInMonth(m)
         const firstDay = new Date(year, m, 1).getDay()
         const daysInMonth = new Date(year, m + 1, 0).getDate()
         const cells = Array.from({ length: firstDay + daysInMonth }, (_, i) => i < firstDay ? null : i - firstDay + 1)
@@ -286,9 +391,14 @@ function YearView({ year, events, onDrillDown }: { year: number; events: Event[]
           <div key={m} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
               <span className="font-semibold text-gray-800 text-sm">{name}</span>
-              {monthEvents.length > 0 && (
-                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{monthEvents.length} event{monthEvents.length > 1 ? 's' : ''}</span>
-              )}
+              <div className="flex items-center gap-1.5">
+                {monthEvents.length > 0 && (
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{monthEvents.length} event{monthEvents.length > 1 ? 's' : ''}</span>
+                )}
+                {monthOpps.length > 0 && (
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium border border-dashed border-amber-300">{monthOpps.length} review</span>
+                )}
+              </div>
             </div>
             <div className="p-3">
               <div className="grid grid-cols-7 mb-1">
@@ -300,43 +410,48 @@ function YearView({ year, events, onDrillDown }: { year: number; events: Event[]
                 {cells.map((day, i) => {
                   if (!day) return <div key={`e-${i}`} />
                   const d = new Date(year, m, day)
-                  const hasEvent = events.some(e => {
+                  const dt = midnightTs(d)
+                  const matchingEvent = events.find(e => {
                     const s = parseDate(e.start_date), en = parseDate(e.end_date || e.start_date)
                     if (!s) return false
-                    const dt = new Date(d); dt.setHours(0,0,0,0)
-                    s.setHours(0,0,0,0); en?.setHours(0,0,0,0)
-                    return dt >= s && dt <= (en || s)
+                    return dt >= midnightTs(s) && dt <= midnightTs(en || s)
                   })
-                  const eventOnDay = hasEvent ? events.find(e => {
-                    const s = parseDate(e.start_date), en = parseDate(e.end_date || e.start_date)
+                  const hasOpp = underReviewOpps.some(o => {
+                    const s = parseDate(o.start_date!), en = parseDate(o.end_date || o.start_date!)
                     if (!s) return false
-                    const dt = new Date(d); dt.setHours(0,0,0,0)
-                    s.setHours(0,0,0,0); en?.setHours(0,0,0,0)
-                    return dt >= s && dt <= (en || s)
-                  }) : null
+                    return dt >= midnightTs(s) && dt <= midnightTs(en || s)
+                  })
+                  const hasEvent = !!matchingEvent
                   const isToday = d.toDateString() === today.toDateString()
-                  const dotColor = eventOnDay ? STATUS_COLORS[eventOnDay.status] || 'bg-blue-400' : ''
+                  const dotColor = matchingEvent ? STATUS_COLORS[matchingEvent.status] || 'bg-blue-400' : ''
                   return (
                     <div key={day}
-                      title={eventOnDay ? `${eventOnDay.name} (${STATUS_LABEL[eventOnDay.status] || eventOnDay.status})` : undefined}
+                      title={matchingEvent ? `${matchingEvent.name} (${STATUS_LABEL[matchingEvent.status] || matchingEvent.status})` : hasOpp ? 'Under Review opportunity' : undefined}
                       onClick={() => onDrillDown(year, m)}
                       className="group/yday flex flex-col items-center gap-0.5 cursor-pointer">
                       <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-medium transition-colors
-                        ${isToday ? 'bg-blue-500 text-white' : hasEvent ? 'text-gray-900 font-bold group-hover/yday:bg-blue-100' : 'text-gray-500 group-hover/yday:bg-blue-100 group-hover/yday:text-blue-600'}`}>
+                        ${isToday ? 'bg-blue-500 text-white' : (hasEvent || hasOpp) ? 'text-gray-900 font-bold group-hover/yday:bg-blue-100' : 'text-gray-500 group-hover/yday:bg-blue-100 group-hover/yday:text-blue-600'}`}>
                         {day}
                       </div>
                       {hasEvent && <div className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />}
-                      {!hasEvent && <div className="w-1.5 h-1.5" />}
+                      {!hasEvent && hasOpp && <div className="w-1.5 h-1.5 rounded-sm bg-amber-400" />}
+                      {!hasEvent && !hasOpp && <div className="w-1.5 h-1.5" />}
                     </div>
                   )
                 })}
               </div>
-              {monthEvents.length > 0 && (
+              {(monthEvents.length > 0 || monthOpps.length > 0) && (
                 <div className="mt-2 space-y-1">
                   {monthEvents.map(e => (
                     <Link key={e.id} href={`/events/${e.id}`}
                       className={`block text-xs px-2 py-0.5 rounded font-medium truncate hover:opacity-80 ${STATUS_TEXT[e.status] || 'text-gray-700 bg-gray-100'}`}>
                       {e.start_date && new Date(e.start_date + 'T00:00:00').getDate()} — {e.name}
+                    </Link>
+                  ))}
+                  {monthOpps.map(o => (
+                    <Link key={`opp-${o.id}`} href="/opportunities?tab=under_review"
+                      className="block text-xs px-2 py-0.5 rounded border border-dashed font-medium truncate hover:opacity-80 bg-amber-100 border-amber-300 text-amber-800">
+                      📋 {o.start_date && new Date(o.start_date + 'T00:00:00').getDate()} — {o.name}
                     </Link>
                   ))}
                 </div>

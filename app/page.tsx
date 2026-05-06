@@ -71,7 +71,8 @@ export default function Dashboard() {
   const [hideCompletedEvents, setHideCompletedEvents] = useState(false)
   const [showUnderReview, setShowUnderReview] = useState(true)
   const [showSetupModal, setShowSetupModal] = useState(false)
-  const [prefsConfigured, setPrefsConfigured] = useState(true)
+  const [prefsConfigured, setPrefsConfigured] = useState(false)
+  const [prefsLoaded, setPrefsLoaded] = useState(false)
 
   useEffect(() => {
     setHideCompletedEvents(localStorage.getItem('dashHideComplete') === '1')
@@ -96,10 +97,14 @@ export default function Dashboard() {
         setOpportunities(opps)
         const configured = s.opp_prefs_configured === 'true'
         setPrefsConfigured(configured)
+        setPrefsLoaded(true)
         // Only auto-show setup modal when prefs aren't configured AND no opportunities yet
         if (!configured && opps.length === 0) setShowSetupModal(true)
       })
-      .catch(() => {})
+      .catch(() => {
+        // Fetch failed — treat as not configured so modal can appear if needed
+        setPrefsLoaded(true)
+      })
   }, [])
 
   const FIT_ORDER: Record<string, number> = { High: 0, Medium: 1, Low: 2 }
@@ -131,7 +136,7 @@ export default function Dashboard() {
 
   return (
     <div className="p-8">
-      {showSetupModal && (
+      {prefsLoaded && showSetupModal && (
         <SetupPreferencesModal
           onClose={() => setShowSetupModal(false)}
           onSaved={() => { setPrefsConfigured(true); setShowSetupModal(false) }}

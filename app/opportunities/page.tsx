@@ -64,7 +64,6 @@ const REC_COLORS: Record<string, string> = {
 
 const FOCUS_AREAS = [
   { val: 'all', label: 'All Focus Areas' },
-  { val: 'ignitetech', label: '🟧 IgniteTech Only' },
   { val: 'cx', label: '🎯 CX & Customer Success' },
   { val: 'community', label: '🌐 Community Management' },
   { val: 'contact_center', label: '📞 Contact Center' },
@@ -119,14 +118,16 @@ export default function OpportunitiesPage() {
     error?: string
   }
   const [confirming, setConfirming] = useState<ConfirmState | null>(null)
-  const [pageTab, setPageTab] = useState<'opportunities' | 'under_review' | 'do_not_attend'>(() => {
+  const [pageTab, setPageTab] = useState<'all' | 'opportunities' | 'under_review' | 'do_not_attend'>(() => {
     if (typeof window !== 'undefined') {
       const t = new URLSearchParams(window.location.search).get('tab')
+      if (t === 'all') return 'all'
       if (t === 'under_review') return 'under_review'
       if (t === 'do_not_attend') return 'do_not_attend'
     }
     return 'opportunities'
   })
+  const [allTabFilter, setAllTabFilter] = useState<'all' | 'pipeline' | 'pending_approval' | 'do_not_attend'>('all')
   const [toast, setToast] = useState<string | null>(null)
   const [reviewNotesDraft, setReviewNotesDraft] = useState<Record<number, string>>({})
   const [savedNotes, setSavedNotes] = useState<Record<number, boolean>>({})
@@ -147,10 +148,15 @@ export default function OpportunitiesPage() {
   // Sync tab with URL param whenever it changes (e.g. sidebar nav click)
   useEffect(() => {
     const tab = searchParams.get('tab')
-    if (tab === 'under_review') setPageTab('under_review')
+    if (tab === 'all') setPageTab('all')
+    else if (tab === 'under_review') setPageTab('under_review')
     else if (tab === 'do_not_attend') setPageTab('do_not_attend')
     else if (!tab) setPageTab('opportunities')
   }, [searchParams])
+
+  // All-tab search/sort state
+  const [allSearch, setAllSearch] = useState('')
+  const [allSortBy, setAllSortBy] = useState<'priority' | 'date' | 'fit'>('priority')
 
   // Search config
   const [focusArea, setFocusArea] = useState<string>('all')
@@ -468,6 +474,35 @@ export default function OpportunitiesPage() {
   const pipelineOpps = opportunities.filter(o => o.status !== 'pending_approval' && o.status !== 'do_not_attend' && !o.added_to_events)
   const underReviewOpps = opportunities.filter(o => o.status === 'pending_approval') // raw — used for count badge
   const doNotAttendOpps = opportunities.filter(o => o.status === 'do_not_attend').sort((a, b) => a.name.localeCompare(b.name))
+
+  // All tab: filter + sort
+  const allTabBaseOpps = opportunities.filter(o => {
+    if (allTabFilter === 'pipeline') return o.status !== 'pending_approval' && o.status !== 'do_not_attend' && !o.added_to_events
+    if (allTabFilter === 'pending_approval') return o.status === 'pending_approval'
+    if (allTabFilter === 'do_not_attend') return o.status === 'do_not_attend'
+    return !o.added_to_events // 'all' — exclude confirmed events
+  })
+  const allTabOpps = allTabBaseOpps
+    .filter(o => {
+      if (!allSearch.trim()) return true
+      const q = allSearch.toLowerCase()
+      return (
+        o.name.toLowerCase().includes(q) ||
+        (o.description || '').toLowerCase().includes(q) ||
+        (o.location || '').toLowerCase().includes(q) ||
+        (o.organizer || '').toLowerCase().includes(q) ||
+        (o.focus_area || '').toLowerCase().includes(q) ||
+        (o.audience_match || '').toLowerCase().includes(q)
+      )
+    })
+    .sort((a, b) => {
+      if (allSortBy === 'date') return (a.start_date || '') < (b.start_date || '') ? -1 : 1
+      if (allSortBy === 'fit') {
+        const fitOrder: Record<string, number> = { High: 0, Medium: 1, Low: 2 }
+        return (fitOrder[a.strategic_fit] ?? 2) - (fitOrder[b.strategic_fit] ?? 2)
+      }
+      return (b.priority_score || 0) - (a.priority_score || 0)
+    })
 
   // Helper: derive quarter string from date
   const getQuarter = (d: string | null) => {
@@ -788,16 +823,17 @@ export default function OpportunitiesPage() {
               {[
                 {
                   id: 'creating',
-                  label: 'Event record created',
+                  label: confirming.step === 'creating' ? 'Setting up your event…' : 'Event record created',
+                  sublabel: confirming.step === 'creating' ? 'This takes a few seconds' : undefined,
                   active: confirming.step === 'creating',
                   done: confirming.step !== 'creating',
                 },
                 {
                   id: 'researching',
                   label: confirming.step === 'researching'
-                    ? 'Searching the web for sponsorship pricing, venue details & vendors…'
+                    ? 'Claude is researching your event…'
                     : 'Web research complete',
-                  sublabel: confirming.step === 'researching' ? 'This takes about 30 seconds' : undefined,
+                  sublabel: confirming.step === 'researching' ? 'Searching for vendors, building a budget, and creating tasks… This usually takes 20–40 seconds.' : undefined,
                   active: confirming.step === 'researching',
                   done: confirming.step === 'done' || confirming.step === 'error',
                 },
@@ -855,26 +891,40 @@ export default function OpportunitiesPage() {
                     {confirming.summary}
                   </div>
                 )}
-                <div className="px-6 pb-5 flex gap-3">
+                <div className="px-6 pb-5 flex flex-col gap-2">
                   <button
                     onClick={() => { setConfirming(null); router.push(`/events/${confirming.eventId}`) }}
-                    className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
                   >
-                    View Event
+                    View Event →
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
                   </button>
-                  <button onClick={() => setConfirming(null)} className="px-4 py-2.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50">
+                  <button onClick={() => setConfirming(null)} className="w-full px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50">
                     Close
                   </button>
                 </div>
               </>
             )}
             {confirming.step === 'error' && (
-              <div className="px-6 pb-5">
-                <p className="text-sm text-red-600 mb-3">{confirming.error}</p>
-                <button onClick={() => setConfirming(null)} className="w-full border border-gray-200 text-gray-700 px-4 py-2.5 rounded-lg text-sm hover:bg-gray-50">
-                  Dismiss
-                </button>
+              <div className="px-6 pb-5 space-y-3">
+                <p className="text-sm text-red-600">{confirming.error}</p>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Your event was created but AI setup didn&apos;t complete. You can set up the budget and tasks manually from the event page.
+                </p>
+                <div className="flex flex-col gap-2">
+                  {confirming.eventId && (
+                    <button
+                      onClick={() => { setConfirming(null); router.push(`/events/${confirming.eventId}`) }}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                    >
+                      View Event Anyway →
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+                    </button>
+                  )}
+                  <button onClick={() => setConfirming(null)} className="w-full border border-gray-200 text-gray-600 hover:text-gray-800 px-4 py-2.5 rounded-lg text-sm hover:bg-gray-50">
+                    Close
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -891,7 +941,8 @@ export default function OpportunitiesPage() {
           {opportunities.length > 0 && (
             <button
               onClick={() => {
-                const currentTabOpps = pageTab === 'opportunities' ? filtered
+                const currentTabOpps = pageTab === 'all' ? allTabOpps
+                  : pageTab === 'opportunities' ? filtered
                   : pageTab === 'under_review' ? filteredUnderReviewOpps
                   : doNotAttendOpps
                 const headers = ['Name', 'Type', 'Start Date', 'Location', 'Expected Attendees', 'Budget Low', 'Budget High', 'Strategic Fit', 'Recommendation', 'Priority Score', 'Status']
@@ -908,7 +959,8 @@ export default function OpportunitiesPage() {
                   String(o.priority_score ?? ''),
                   o.status || '',
                 ])
-                const filename = pageTab === 'opportunities' ? 'opportunities-pipeline.csv'
+                const filename = pageTab === 'all' ? 'opportunities-all.csv'
+                  : pageTab === 'opportunities' ? 'opportunities-pipeline.csv'
                   : pageTab === 'under_review' ? 'opportunities-under-review.csv'
                   : 'opportunities-do-not-attend.csv'
                 downloadCSV(filename, rows, headers)
@@ -1076,11 +1128,19 @@ export default function OpportunitiesPage() {
       {/* Tab switcher */}
       <div className="flex items-center gap-4 mb-6 border-b border-gray-200">
         <button
+          onClick={() => { setPageTab('all'); router.replace('/opportunities?tab=all', { scroll: false }) }}
+          className={`flex items-center gap-2 px-1 pb-3 text-sm font-medium border-b-2 -mb-px transition-all ${pageTab === 'all' ? 'border-violet-500 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+          All
+          <span className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${pageTab === 'all' ? 'bg-violet-100 text-violet-700' : 'bg-gray-200 text-gray-500'}`}>{opportunities.filter(o => !o.added_to_events).length}</span>
+        </button>
+        <button
           onClick={() => { setPageTab('opportunities'); router.replace('/opportunities', { scroll: false }) }}
           className={`flex items-center gap-2 px-1 pb-3 text-sm font-medium border-b-2 -mb-px transition-all ${pageTab === 'opportunities' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347A3.99 3.99 0 0112 16a3.99 3.99 0 01-2.828-1.172l-.347-.347z"/></svg>
-          Opportunities
+          Pipeline
           <span className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${pageTab === 'opportunities' ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-500'}`}>{pipelineOpps.length}</span>
         </button>
         <button
@@ -1120,6 +1180,153 @@ export default function OpportunitiesPage() {
               <div className={`text-xs mt-0.5 ${s.label === 'Under Review' ? 'text-amber-500' : 'text-gray-400'}`}>{s.sub}</div>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* ── ALL TAB ───────────────────────────────────────────────────────── */}
+      {pageTab === 'all' && (
+        <div>
+          {/* Status filter pills */}
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            {([
+              { v: 'all', l: 'All' },
+              { v: 'pipeline', l: 'Pipeline' },
+              { v: 'pending_approval', l: 'Under Review' },
+              { v: 'do_not_attend', l: 'Do Not Attend' },
+            ] as { v: 'all' | 'pipeline' | 'pending_approval' | 'do_not_attend', l: string }[]).map(f => (
+              <button key={f.v} onClick={() => setAllTabFilter(f.v)}
+                className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${allTabFilter === f.v ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-600 border-gray-200 hover:border-violet-400 hover:text-violet-700'}`}>
+                {f.l}
+              </button>
+            ))}
+            <div className="ml-auto flex items-center gap-2">
+              {/* Search */}
+              <div className="relative">
+                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                <input value={allSearch} onChange={e => setAllSearch(e.target.value)}
+                  placeholder="Search…"
+                  className="pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 w-44"
+                />
+                {allSearch && (
+                  <button onClick={() => setAllSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+                  </button>
+                )}
+              </div>
+              {/* Sort */}
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-gray-500 font-medium">Sort:</span>
+                {([
+                  { v: 'priority', l: 'Priority' },
+                  { v: 'fit', l: 'Strategic Fit' },
+                  { v: 'date', l: 'Date' },
+                ] as { v: 'priority' | 'fit' | 'date', l: string }[]).map(s => (
+                  <button key={s.v} onClick={() => setAllSortBy(s.v)}
+                    className={`px-2.5 py-1 rounded-full border transition-colors ${allSortBy === s.v ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}>
+                    {s.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {allTabOpps.length === 0 ? (
+            <div className="text-center py-16 border border-dashed border-gray-200 rounded-xl text-gray-400">
+              <p className="font-medium text-sm">No opportunities match your filters</p>
+              <p className="text-xs mt-1">Try changing the status filter or clearing the search</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-400">{allTabOpps.length} opportunit{allTabOpps.length === 1 ? 'y' : 'ies'}</p>
+              {allTabOpps.map((opp, i) => {
+                const statusBadge = opp.status === 'pending_approval'
+                  ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 font-medium">Under Review</span>
+                  : opp.status === 'do_not_attend'
+                  ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200 font-medium">Do Not Attend</span>
+                  : null
+                return (
+                  <div key={opp.id ?? i}
+                    className={`bg-white rounded-xl border shadow-sm ${opp.status === 'pending_approval' ? 'border-amber-200' : opp.status === 'do_not_attend' ? 'border-red-200 opacity-80' : 'border-gray-200'}`}>
+                    <div className="p-5">
+                      <div className="flex items-start gap-4">
+                        <div className="flex-1 min-w-0">
+                          {/* Title + badges */}
+                          <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                            <h3 className="font-semibold text-gray-900 text-base leading-tight">{opp.name}</h3>
+                            {statusBadge}
+                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium border ${FIT_COLORS[opp.strategic_fit] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                              {opp.strategic_fit} Fit
+                            </span>
+                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium border ${REC_COLORS[opp.recommendation] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                              {opp.recommendation}
+                            </span>
+                            {opp.speaking_opportunity && (
+                              <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+                                Speaking Opp
+                              </span>
+                            )}
+                            {opp.focus_area && (
+                              <span className="rounded-full px-2 py-0.5 text-xs text-gray-500 bg-gray-50 border border-gray-100">{opp.focus_area}</span>
+                            )}
+                          </div>
+                          {/* Meta */}
+                          <div className="flex items-center gap-4 text-xs text-gray-500 mb-2 flex-wrap">
+                            {opp.start_date && (
+                              <span className="flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                {new Date(opp.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </span>
+                            )}
+                            {opp.location && (
+                              <span className="flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                {opp.location}
+                              </span>
+                            )}
+                            {(opp.budget_estimate_low || opp.budget_estimate_high) && (
+                              <span className="flex items-center gap-1 font-medium text-gray-600">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                {fmt(opp.budget_estimate_low!)} – {fmt(opp.budget_estimate_high!)}
+                              </span>
+                            )}
+                            {opp.website && (
+                              <a href={opp.website} target="_blank" rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-blue-500 hover:text-blue-700 hover:underline font-medium">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                Website
+                              </a>
+                            )}
+                          </div>
+                          {/* Description */}
+                          {opp.description && (
+                            <p className="text-sm text-gray-600 mb-2 leading-relaxed">{opp.description}</p>
+                          )}
+                          {/* review_notes for Under Review items */}
+                          {opp.status === 'pending_approval' && opp.review_notes && (
+                            <p className="text-xs text-amber-700 italic mt-1">{opp.review_notes}</p>
+                          )}
+                          {/* dna_notes for Do Not Attend items */}
+                          {opp.status === 'do_not_attend' && opp.dna_notes && (
+                            <p className="text-xs text-red-600 italic mt-1">{opp.dna_notes}</p>
+                          )}
+                        </div>
+                        {/* Priority score */}
+                        {opp.priority_score != null && (
+                          <div className="flex-shrink-0 text-right">
+                            <PriorityBar score={opp.priority_score} />
+                            <span className="text-xs text-gray-400">Priority score</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1636,9 +1843,9 @@ export default function OpportunitiesPage() {
           </svg>
           <div className="text-center">
             <p className="text-sm font-medium text-gray-600">
-              {loading ? `Claude is scanning for opportunities…` : 'Loading saved opportunities...'}
+              {loading ? `Claude is searching the web for events…` : 'Loading saved opportunities...'}
             </p>
-            {loading && <p className="text-xs text-gray-400 mt-1">Searching the web, scoring events by audience fit and strategic value</p>}
+            {loading && <p className="text-xs text-gray-400 mt-1">This usually takes 20–40 seconds.</p>}
           </div>
         </div>
       )}
@@ -1650,7 +1857,7 @@ export default function OpportunitiesPage() {
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
           </svg>
-          Claude is scanning for new opportunities in the background — results will update automatically
+          Claude is searching the web for events… This usually takes 20–40 seconds. Results will update automatically.
         </div>
       )}
 

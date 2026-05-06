@@ -311,6 +311,7 @@ export default function OutcomesTab({ eventId, event }: OutcomesTabProps) {
           value={roi != null ? `${roi >= 0 ? '+' : ''}${Math.round(roi)}%` : '—'}
           color={roi == null ? 'gray' : roi >= 0 ? 'green' : 'red'}
           sub={roi != null ? (roi >= 0 ? 'vs. budget invested' : 'below break-even') : 'insufficient data'}
+          showRoiTooltip
         />
       </div>
 
@@ -421,11 +422,14 @@ export default function OutcomesTab({ eventId, event }: OutcomesTabProps) {
               value={editForm.pipeline_generated}
               onChange={v => setEditForm(f => ({ ...f, pipeline_generated: v }))}
             />
-            <EditField
-              label="Revenue Attributed ($)"
-              value={editForm.revenue_attributed}
-              onChange={v => setEditForm(f => ({ ...f, revenue_attributed: v }))}
-            />
+            <div>
+              <EditField
+                label="Revenue Attributed ($)"
+                value={editForm.revenue_attributed}
+                onChange={v => setEditForm(f => ({ ...f, revenue_attributed: v }))}
+              />
+              <p className="text-xs text-gray-400 mt-1">Tip: Start with your actual closed revenue from this event. If deals are still open, use Pipeline Generated as a leading indicator.</p>
+            </div>
             <EditField
               label="Sponsorship Revenue ($)"
               value={editForm.sponsorship_revenue}
@@ -509,7 +513,9 @@ export default function OutcomesTab({ eventId, event }: OutcomesTabProps) {
   )
 }
 
-function ROIMetricCard({ label, value, color, sub }: { label: string; value: string; color: string; sub?: string }) {
+const ROI_TOOLTIP = 'ROI = (Revenue Attributed − Budget Spent) ÷ Budget Spent × 100. Pipeline Generated is shown separately — it represents potential deals not yet closed. The 22% pipeline-to-revenue conversion used in AI estimates is a B2B industry average. Update Revenue Attributed with your actual closed revenue as deals progress.'
+
+function ROIMetricCard({ label, value, color, sub, showRoiTooltip }: { label: string; value: string; color: string; sub?: string; showRoiTooltip?: boolean }) {
   const colorMap: Record<string, string> = {
     blue: 'text-blue-600',
     green: 'text-green-600',
@@ -519,7 +525,17 @@ function ROIMetricCard({ label, value, color, sub }: { label: string; value: str
   }
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 text-center">
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">{label}</p>
+      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 flex items-center justify-center gap-1">
+        {label}
+        {showRoiTooltip && (
+          <span className="relative group inline-flex items-center">
+            <span className="text-gray-400 hover:text-gray-600 cursor-help text-sm leading-none select-none">ⓘ</span>
+            <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 bg-white border border-gray-200 shadow-lg rounded-lg px-3 py-2.5 text-xs text-gray-700 font-normal normal-case tracking-normal text-left opacity-0 group-hover:opacity-100 transition-opacity z-50 leading-relaxed">
+              {ROI_TOOLTIP}
+            </span>
+          </span>
+        )}
+      </p>
       <p className={`text-2xl font-bold ${colorMap[color] || 'text-gray-900'}`}>{value}</p>
       {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
     </div>

@@ -380,9 +380,9 @@ export default function NotificationsPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p className="text-sm text-amber-800">
-            Your identity isn&apos;t set up yet. Go to{' '}
+            To see your tasks here, go to the{' '}
             <Link href="/team" className="font-semibold underline hover:text-amber-900">Team</Link>
-            {' '}— find your name — check &ldquo;This is me&rdquo; so your tasks appear here.
+            {' '}page and mark yourself as <strong>Me</strong>. If you haven&apos;t added yourself yet, add your name there first — it only takes a moment.
           </p>
         </div>
       )}

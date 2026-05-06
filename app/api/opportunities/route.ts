@@ -45,9 +45,6 @@ export async function POST(req: NextRequest) {
     const existingList = existing.map(e => `- ${e.name} (${e.type}, ${e.location || ''}, ${e.start_date || ''})`).join('\n') || 'None yet'
     const now = new Date().toISOString()
 
-    // When focus is ignitetech, force relevant_for = ignitetech on all results
-    const forceIgniteTech = focusArea === 'ignitetech'
-
     // Build focus area guidance
     const focusGuidance: Record<string, string> = {
       cx: 'Focus ONLY on Customer Experience (CX), customer success, and digital transformation events — CCW, Gartner CX, Forrester CX, ICMI, CX Network, Zendesk Relate, Gainsight Pulse, and similar.',
@@ -107,17 +104,7 @@ RESPONSIBLE AI / GOVERNANCE:
 - World Summit AI — includes AI Governance track
 
 Always search for newly announced AI conferences and summits not on this list. The AI conference landscape evolves rapidly — new events launch every quarter.`,
-      executive: 'Focus ONLY on C-suite and executive leadership forums where Eric Vaughan or IgniteTech/Khoros leadership could speak or attend — Forbes CEO Summit, Fortune CEO Initiative, WSJ Tech Live, Gartner Symposium, PE/investor forums.',
-      ignitetech: `Focus EXCLUSIVELY on events where IgniteTech as a COMPANY (not Khoros the product) would benefit. These are events relevant to:
-- Private equity-backed enterprise software companies and their executives
-- M&A, software acquisitions, and PE portfolio company strategy (ACG InterGrowth, Software Equity Group, Corum CXO)
-- Enterprise software CEO/founder/operator forums (SaaStr Annual, Pavilion CRO Summit, Operators Summit)
-- PE/VC investor-facing events where IgniteTech leadership builds relationships with LPs, co-investors, and deal flow (DealBook Summit, Forbes CEO Forum, Fortune CEO Initiative, WSJ CEO Council, Milken Institute)
-- AI-first enterprise software company events — specifically about companies using AI to transform mature software portfolios (Bain Tech Summit, BCG Tech Advantage)
-- IgniteTech's specific AI products: Eloquens AI (email automation), MyPersonas (AI digital clones of experts), Adminio AI (scheduling intelligence) — events where these products could be showcased to enterprise buyers
-- B2B SaaS operator and growth events where IgniteTech's playbook of acquiring and scaling mature software is a differentiator
-- Executive speaking slots where Eric Vaughan can position IgniteTech as a leading AI-first acquirer of enterprise software
-DO NOT include Khoros product events (community, CX, contact center, social media). ALL results must have relevant_for = "ignitetech".`,
+      executive: 'Focus ONLY on C-suite and executive leadership forums — Forbes CEO Summit, Fortune CEO Initiative, WSJ Tech Live, Gartner Symposium, PE/investor forums.',
       all: `Cast the WIDEST possible net across ALL of the following categories. Do not default to a narrow set — prioritize variety and discovery:
 
 1. LARGE-SCALE ENTERPRISE TECH EXPOS: GITEX Global (Dubai, Dec, 200,000+), GITEX AI Europe (Berlin, June), GITEX Asia (Singapore, April), Web Summit (Lisbon, Nov, 70,000+), MWC Barcelona (March, 100,000+), VivaTech (Paris, June, 180,000+), Collision (Toronto, June, 30,000+), Hannover Messe (April, 130,000+), CES (Jan), AWS re:Invent (Las Vegas, Nov/Dec, 50,000+), Google Cloud Next, Salesforce Dreamforce, ServiceNow Knowledge, Adobe Summit, IBM Think.
@@ -161,7 +148,7 @@ ${userCustomerProfile ? `Target customer profile: ${userCustomerProfile}` : ''}
 ${userFocusAreas.length ? `Priority focus areas: ${userFocusAreas.join(', ')}` : ''}
 ${userRegions.length ? `Target regions: ${userRegions.join(', ')}` : ''}
 
-Tailor all opportunity descriptions, audience match analysis, and scoring to this company and their goals. Where the built-in IgniteTech/Khoros context conflicts with these preferences, defer to the user's configured company.
+Tailor all opportunity descriptions, audience match analysis, and scoring to this company and their goals.
 ` : ''
 
     const prompt = `You are a senior Events Strategy advisor. Your job is to find the highest-value conference sponsorship, speaking, and attendance opportunities in the next 18 months (from April 2026 onward).
@@ -244,9 +231,9 @@ Identify 20-25 high-value event opportunities NOT already in our system above. P
 For each event, provide MAXIMUM DETAIL:
 - Specific venue if known
 - Realistic sponsorship/attendance cost ranges based on event size and typical packages (research-grade estimates)
-- Names of past sponsors from our competitive set (Sprinklr, Salesforce, Zendesk, Gainsight, Higher Logic, Genesys, Five9, Hootsuite, Sprout Social)
-- Whether Eric Vaughan could realistically secure a KEYNOTE or LEAD SPONSOR speaking slot (not generic panels — only flag if the event sells named keynote sponsorships, has open call-for-keynotes, or Eric Vaughan's profile clearly fits a headline slot)
-- The specific Khoros product(s) most relevant (Community, Social, Care, Contact Center, AI)
+- Names of notable past sponsors relevant to the company's competitive landscape
+- Whether the configured executive speaker (or the company's leadership) could realistically secure a KEYNOTE or LEAD SPONSOR speaking slot (not generic panels — only flag if the event sells named keynote sponsorships, has open call-for-keynotes, or their profile clearly fits a headline slot)
+- The specific product(s) or business area most relevant to the company
 - Why this event matters NOW in 2026 (market trends, competitive dynamics)
 
 Return a JSON array ONLY (no other text, no markdown, just the raw array):
@@ -266,21 +253,21 @@ Return a JSON array ONLY (no other text, no markdown, just the raw array):
     "strategic_fit": "High",
     "focus_area": "Customer Experience",
     "region": "North America",
-    "relevant_for": "ignitetech OR khoros OR both — ignitetech = executive brand/PE/AI portfolio events where IgniteTech is the entity, khoros = product-specific events where CX/community/contact center/social media buyers attend, both = events relevant to both companies",
-    "audience_match": "2-3 focused sentences. If relevant_for=khoros: name the exact job titles who attend and which Khoros product (Community/Social/Care/Contact Center/Aurora AI) is relevant. If relevant_for=ignitetech: explain why this event fits IgniteTech's AI-first portfolio story or Eric Vaughan's executive brand. If relevant_for=both: split clearly with 'For Khoros: ...' and 'For IgniteTech: ...' sections.",
+    "relevant_for": "null or a string describing which part of the company this is relevant for (e.g. 'corporate brand', 'product sales', 'both') — tailor to the configured company context",
+    "audience_match": "2-3 focused sentences explaining which job titles attend and why this event fits the company's target customer profile and goals.",
     "recommendation": "Sponsor | Evaluate | Speak — never use Attend",
-    "description": "3-4 sentences: what this event is, whether it's primarily for IgniteTech (corporate/executive brand) or Khoros (product sales/marketing), and what business outcome attending/sponsoring drives",
-    "past_sponsors": "List 5-8 relevant past sponsors from Khoros competitive set, e.g.: Sprinklr, Salesforce, Zendesk, Genesys, Gainsight, Higher Logic",
-    "speaking_opportunity": "ONLY populate if the event has a genuine keynote sponsorship package, a named lead-sponsor speaking slot, or an open call-for-keynotes that Eric Vaughan's profile credibly fits. Describe the specific slot type and topic angle, e.g. 'Keynote sponsor slot: AI-first enterprise software acquisition playbook' or 'Opening keynote: The future of AI in B2B SaaS'. Set to null for generic breakout panels, roundtables, or events with no realistic path to a headline speaking role.",
-    "networking_value": "Who Eric Vaughan would meet — specific titles and companies, analyst relationships, competitive intelligence opportunities",
-    "why_now": "1-2 sentences on why 2026 specifically is the right time for Khoros to be at this event — market trends, product launches, competitive dynamics",
+    "description": "3-4 sentences: what this event is and what business outcome attending/sponsoring drives for the configured company",
+    "past_sponsors": "List 5-8 relevant past sponsors from the company's competitive landscape",
+    "speaking_opportunity": "ONLY populate if the event has a genuine keynote sponsorship package, a named lead-sponsor speaking slot, or an open call-for-keynotes that the configured executive speaker's profile credibly fits. Describe the specific slot type and topic angle. Set to null for generic breakout panels, roundtables, or events with no realistic path to a headline speaking role.",
+    "networking_value": "Who the executive speaker or team would meet — specific titles and companies, analyst relationships, competitive intelligence opportunities",
+    "why_now": "1-2 sentences on why 2026 specifically is the right time for the company to be at this event — market trends, product launches, competitive dynamics",
     "priority_score": 87
   }
 ]
 
 priority_score (0-100): ${userCompany
       ? `audience quality vs. ${userCompany} target customer profile (35%) + reach/scale of event (20%) + competitive battleground importance (20%)${userSpeaker ? ` + ${userSpeaker} speaking/leadership opportunity (15%) + cost efficiency (10%)` : ' + cost efficiency (20%)'}`
-      : 'audience quality vs. Khoros ICP (35%) + reach/scale (20%) + competitive battleground importance (20%) + Eric Vaughan speaking/leadership opportunity (15%) + cost efficiency (10%)'}.
+      : 'audience quality vs. target customer profile (35%) + reach/scale of event (20%) + competitive battleground importance (20%) + executive speaking/leadership opportunity (15%) + cost efficiency (10%)'}.
 Sort by priority_score descending.`
 
     const message = await client.messages.create({
@@ -352,7 +339,7 @@ Sort by priority_score descending.`
           opp.past_sponsors || null, opp.priority_score || null,
           opp.speaking_opportunity || null, opp.networking_value || null,
           opp.focus_area || null, opp.region || null, opp.why_now || null,
-          forceIgniteTech ? 'ignitetech' : (opp.relevant_for || 'khoros'),
+          opp.relevant_for || null,
           now
         )
         added++
