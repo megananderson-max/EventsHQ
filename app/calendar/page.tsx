@@ -189,11 +189,6 @@ function getWeekStart(d: Date) {
   return start
 }
 
-/** Return a timestamp for midnight of a given Date (non-mutating). */
-function midnight(d: Date): number {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-}
-
 function WeekView({ currentDate, eventsOnDate, oppsOnDate, onNewEvent }: {
   currentDate: Date
   eventsOnDate: (d: Date) => Event[]
