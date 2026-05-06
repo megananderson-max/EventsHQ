@@ -134,7 +134,7 @@ Generate a comprehensive event setup. Return ONLY a JSON object (no other text):
   ],
   "vendor_suggestions": [
     {
-      "name": "Vendor/Organiser name",
+      "name": "Vendor/Organizer name",
       "category": "sponsorship",
       "notes": "Why this vendor, contact info if known"
     }

@@ -154,7 +154,7 @@ Use web search to actively discover events not listed here — especially newly 
 ═══════════════════════════════════════════════════
 USER-CONFIGURED SEARCH PREFERENCES (use these to tailor results)
 ═══════════════════════════════════════════════════
-Company / organisation: ${userCompany}
+Company / organization: ${userCompany}
 ${userBrands ? `Products / brands: ${userBrands}` : ''}
 ${userSpeaker ? `Executive speaker: ${userSpeaker}` : ''}
 ${userCustomerProfile ? `Target customer profile: ${userCustomerProfile}` : ''}
@@ -239,7 +239,7 @@ YOUR TASK
 ${focusGuidance[focusArea] || focusGuidance['all']}
 ${regionGuidance[region] || regionGuidance['all']}
 
-Identify 20-25 high-value event opportunities NOT already in our system above. Prioritise breadth of discovery — use web search to find events you may not immediately know, especially large-scale expos and summits that may not come to mind first. Do not default to the same well-known events every time. Actively search for what's happening in 2026 and 2027.
+Identify 20-25 high-value event opportunities NOT already in our system above. Prioritize breadth of discovery — use web search to find events you may not immediately know, especially large-scale expos and summits that may not come to mind first. Do not default to the same well-known events every time. Actively search for what's happening in 2026 and 2027.
 
 For each event, provide MAXIMUM DETAIL:
 - Specific venue if known

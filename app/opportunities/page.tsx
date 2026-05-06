@@ -1445,7 +1445,7 @@ export default function OpportunitiesPage() {
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search opportunities by name, location, organiser, focus area…"
+            placeholder="Search opportunities by name, location, organizer, focus area…"
             className="w-full bg-white border border-gray-200 rounded-xl pl-10 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 shadow-sm"
           />
           {searchQuery && (
@@ -1594,7 +1594,7 @@ export default function OpportunitiesPage() {
               <div className="relative">
                 <button onClick={() => setShowFilterCustomizer(s => !s)}
                   className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors ${showFilterCustomizer ? 'bg-gray-100 border-gray-300 text-gray-700' : 'border-gray-200 text-gray-400 hover:text-gray-600 hover:border-gray-300'}`}
-                  title="Customise filters">
+                  title="Customize filters">
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                   </svg>

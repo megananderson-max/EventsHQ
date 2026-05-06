@@ -12,9 +12,15 @@ const FOCUS_OPTIONS = [
   { val: 'executive',      label: 'Executive Leadership' },
 ]
 const REGION_OPTIONS = [
-  { val: 'north_america', label: 'North America' },
-  { val: 'europe',        label: 'Europe' },
-  { val: 'apac',          label: 'APAC' },
+  { val: 'north_america',  label: 'North America' },
+  { val: 'latam',          label: 'Latin America' },
+  { val: 'europe',         label: 'Europe' },
+  { val: 'uk',             label: 'United Kingdom' },
+  { val: 'middle_east',    label: 'Middle East' },
+  { val: 'africa',         label: 'Africa' },
+  { val: 'apac',           label: 'APAC' },
+  { val: 'southeast_asia', label: 'Southeast Asia' },
+  { val: 'global',         label: 'Global / Virtual' },
 ]
 
 interface Props {
@@ -37,6 +43,7 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
   const [focusAreas, setFocusAreas]                   = useState<string[]>([])
   const [customFocusInput, setCustomFocusInput]       = useState('')
   const [regions, setRegions]                         = useState<string[]>(['north_america'])
+  const [customRegionInput, setCustomRegionInput]     = useState('')
   const [saving, setSaving]                           = useState(false)
   const [loadingPrefs, setLoadingPrefs]               = useState(true)
   const [hasExistingPrefs, setHasExistingPrefs]       = useState(false)
@@ -257,7 +264,7 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Company / organisation name <span className="text-red-500">*</span>
+                    Company / organization name <span className="text-red-500">*</span>
                   </label>
                   <input value={companyName} onChange={e => setCompanyName(e.target.value)}
                     placeholder="e.g. Acme Corp"
@@ -346,6 +353,40 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
                         {r.label}
                       </button>
                     ))}
+                    {regions.filter(v => !REGION_OPTIONS.find(r => r.val === v)).map(v => (
+                      <button key={v} type="button" onClick={() => toggleRegion(v)}
+                        className="px-3 py-1.5 rounded-full border text-xs font-medium bg-violet-600 text-white border-violet-600 flex items-center gap-1">
+                        {v}
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <input
+                      value={customRegionInput}
+                      onChange={e => setCustomRegionInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && customRegionInput.trim()) {
+                          const val = customRegionInput.trim()
+                          if (!regions.includes(val)) setRegions(p => [...p, val])
+                          setCustomRegionInput('')
+                        }
+                      }}
+                      placeholder="Add another region…"
+                      className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    />
+                    <button type="button"
+                      onClick={() => {
+                        const val = customRegionInput.trim()
+                        if (val && !regions.includes(val)) setRegions(p => [...p, val])
+                        setCustomRegionInput('')
+                      }}
+                      disabled={!customRegionInput.trim()}
+                      className="px-3 py-1.5 rounded-lg border border-violet-200 text-xs font-medium text-violet-600 hover:bg-violet-50 disabled:opacity-40 transition-colors">
+                      Add
+                    </button>
                   </div>
                 </div>
               </div>

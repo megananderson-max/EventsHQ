@@ -22,7 +22,7 @@ ${description.trim()}
 
 Return ONLY a valid JSON object with these exact fields:
 {
-  "company_name": "The company or organisation name",
+  "company_name": "The company or organization name",
   "brands": "Product or brand names, comma-separated (leave empty string if none mentioned)",
   "speaker_name": "Executive speaker name if mentioned (leave empty string if none)",
   "customer_profile": "A concise 1-2 sentence description of their ideal customer (job titles, company size, industry)",
