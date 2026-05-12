@@ -455,6 +455,17 @@ export default function OpportunitiesPage() {
       setOpportunities(prev => prev.map(o => o.id === opp.id ? { ...o, added_to_events: 1, status: 'approved' } : o))
       setAddedEventIds(prev => ({ ...prev, [opp.id!]: newEventId }))
 
+      // Fire-and-forget deadline extraction — runs silently after event is created
+      fetch(`/api/events/${newEventId}/extract-deadlines`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_name: opp.name,
+          event_url: opp.website || undefined,
+          event_date: opp.start_date || undefined
+        })
+      }).catch(() => {})
+
       setConfirming({
         step: 'done',
         opp,

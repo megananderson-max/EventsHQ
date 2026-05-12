@@ -62,6 +62,23 @@ interface Opportunity {
   status: string
 }
 
+interface PlanningItem {
+  id: number
+  event_id: number
+  title: string
+  status: string
+  assigned_to: string | null
+  due_date: string | null
+}
+
+interface TeamMember {
+  id: number
+  name: string
+  first_name: string | null
+  last_name: string | null
+  is_me: number
+}
+
 export default function Dashboard() {
   const [events, setEvents] = useState<Event[]>([])
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
@@ -73,6 +90,10 @@ export default function Dashboard() {
   const [showSetupModal, setShowSetupModal] = useState(false)
   const [prefsConfigured, setPrefsConfigured] = useState(false)
   const [prefsLoaded, setPrefsLoaded] = useState(false)
+  const [eventsNeedingOutcomes, setEventsNeedingOutcomes] = useState<Event[]>([])
+  const [dismissedOutcomePrompt, setDismissedOutcomePrompt] = useState(false)
+  const [myOverdueTasks, setMyOverdueTasks] = useState(0)
+  const [dismissedTaskBanner, setDismissedTaskBanner] = useState(false)
 
   useEffect(() => {
     setHideCompletedEvents(localStorage.getItem('dashHideComplete') === '1')
@@ -85,7 +106,21 @@ export default function Dashboard() {
   useEffect(() => {
     fetch('/api/events')
       .then(r => r.json())
-      .then(data => { setEvents(data); setLoading(false) })
+      .then((data: Event[]) => {
+        setEvents(data)
+        setLoading(false)
+        // Compute events needing outcomes
+        const today = new Date().toISOString().split('T')[0]
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        const needsOutcomes = data.filter(e =>
+          e.end_date &&
+          e.end_date < today &&
+          e.end_date > thirtyDaysAgo &&
+          (e.status === 'confirmed' || e.status === 'complete') &&
+          !(e as Event & { post_event_completed?: number }).post_event_completed
+        )
+        setEventsNeedingOutcomes(needsOutcomes)
+      })
       .catch(() => setLoading(false))
 
     Promise.all([
@@ -105,6 +140,25 @@ export default function Dashboard() {
         // Fetch failed — treat as not configured so modal can appear if needed
         setPrefsLoaded(true)
       })
+
+    Promise.all([
+      fetch('/api/planning').then(r => r.json()),
+      fetch('/api/team-members').then(r => r.json()),
+    ])
+      .then(([planningData, teamData]: [PlanningItem[], TeamMember[]]) => {
+        const me = teamData.find(m => m.is_me === 1)
+        if (!me) return
+        const myName = [me.first_name, me.last_name].filter((v): v is string => Boolean(v)).join(' ') || me.name
+        const today = new Date().toISOString().split('T')[0]
+        const overdue = planningData.filter(item =>
+          item.status !== 'complete' &&
+          item.due_date !== null &&
+          item.due_date <= today &&
+          item.assigned_to === myName
+        )
+        setMyOverdueTasks(overdue.length)
+      })
+      .catch(() => {})
   }, [])
 
   const FIT_ORDER: Record<string, number> = { High: 0, Medium: 1, Low: 2 }
@@ -187,6 +241,61 @@ export default function Dashboard() {
 
       {/* Quarterly Snapshot */}
       <QuarterSnapshot events={events} opportunities={opportunities} loading={loading} />
+
+      {/* Today's Tasks Banner */}
+      {myOverdueTasks > 0 && !dismissedTaskBanner && (
+        <div className="mb-4 flex items-center gap-4 bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
+          <svg className="w-5 h-5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-blue-900">
+              You have {myOverdueTasks} task{myOverdueTasks !== 1 ? 's' : ''} due today or overdue
+            </p>
+            <Link href="/notifications" className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+              View My Tasks →
+            </Link>
+          </div>
+          <button
+            onClick={() => setDismissedTaskBanner(true)}
+            className="text-blue-400 hover:text-blue-600 flex-shrink-0 ml-2"
+            title="Dismiss"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      )}
+
+      {/* Post-Event Outcome Prompts */}
+      {eventsNeedingOutcomes.length > 0 && !dismissedOutcomePrompt && (
+        <div className="mb-4 flex items-start gap-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
+          <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-900">
+              {eventsNeedingOutcomes.length} event{eventsNeedingOutcomes.length !== 1 ? 's' : ''} ended recently — ready to log outcomes?
+            </p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              {eventsNeedingOutcomes.slice(0, 2).map(e => e.name).join(' · ')}
+              {eventsNeedingOutcomes.length > 2 ? ` · +${eventsNeedingOutcomes.length - 2} more` : ''}
+            </p>
+          </div>
+          <Link
+            href={`/events/${eventsNeedingOutcomes[0].id}?tab=outcomes`}
+            className="flex-shrink-0 text-xs font-medium bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+          >
+            Log Outcomes →
+          </Link>
+          <button
+            onClick={() => setDismissedOutcomePrompt(true)}
+            className="text-amber-400 hover:text-amber-600 flex-shrink-0 ml-1"
+            title="Dismiss"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      )}
 
       {/* Recent Events Table */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">

@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
+const VALID_FOCUS_AREAS = ['all', 'community', 'cx', 'social', 'executive', 'technology', 'marketing', 'sales']
+const VALID_REGIONS = ['north_america', 'latin_america', 'europe', 'united_kingdom', 'middle_east', 'africa', 'apac', 'southeast_asia', 'global']
+
 const FOCUS_OPTIONS = [
   { val: 'cx',             label: 'CX & Customer Success' },
   { val: 'community',      label: 'Community Management' },
@@ -49,6 +52,14 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
   const [loadingPrefs, setLoadingPrefs]               = useState(true)
   const [hasExistingPrefs, setHasExistingPrefs]       = useState(false)
 
+  // URL auto-populate step
+  const [enrichStep, setEnrichStep]                   = useState<'url_input' | 'form'>('url_input')
+  const [websiteInput, setWebsiteInput]               = useState('')
+  const [linkedinInput, setLinkedinInput]             = useState('')
+  const [enrichLoading, setEnrichLoading]             = useState(false)
+  const [enrichError, setEnrichError]                 = useState<string | null>(null)
+  const [enrichedFrom, setEnrichedFrom]               = useState<string | null>(null)
+
   useEffect(() => {
     fetch('/api/settings')
       .then(r => r.json())
@@ -65,6 +76,63 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       .catch(() => {})
       .finally(() => setLoadingPrefs(false))
   }, [])
+
+  // If user has existing prefs (i.e. editing), skip the URL step
+  useEffect(() => {
+    if (!loadingPrefs && hasExistingPrefs) {
+      setEnrichStep('form')
+    }
+  }, [loadingPrefs, hasExistingPrefs])
+
+  const runEnrich = async () => {
+    if (!websiteInput.trim()) return
+    setEnrichLoading(true)
+    setEnrichError(null)
+    try {
+      const res = await fetch('/api/enrich-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ websiteUrl: websiteInput.trim(), linkedinUrl: linkedinInput.trim() || undefined }),
+      })
+      const data = await res.json() as {
+        success: boolean
+        error?: string
+        profile?: {
+          company_name?: string
+          company_description?: string
+          focus_areas?: string[]
+          regions?: string[]
+          speaker_name?: string | null
+          website_url?: string
+        }
+      }
+      if (!res.ok || !data.success) throw new Error(data.error || 'Auto-populate failed')
+      const p = data.profile!
+      if (p.company_name)      setCompanyName(p.company_name)
+      if (p.company_description) setCustomerProfile(p.company_description)
+      if (Array.isArray(p.focus_areas) && p.focus_areas.length) {
+        setFocusAreas(p.focus_areas.filter(v => VALID_FOCUS_AREAS.includes(v)))
+      }
+      if (Array.isArray(p.regions) && p.regions.length) {
+        setRegions(p.regions.filter(v => VALID_REGIONS.includes(v)))
+      }
+      if (p.speaker_name) setSpeakerName(p.speaker_name)
+
+      // Extract domain for the banner
+      try {
+        setEnrichedFrom(new URL(websiteInput.trim()).hostname.replace(/^www\./, ''))
+      } catch {
+        setEnrichedFrom(websiteInput.trim())
+      }
+
+      setMode('manual')
+      setEnrichStep('form')
+    } catch (e) {
+      setEnrichError(e instanceof Error ? e.message : 'Auto-populate failed')
+    } finally {
+      setEnrichLoading(false)
+    }
+  }
 
   const toggleFocus  = (v: string) => setFocusAreas(p => p.includes(v) ? p.filter(x => x !== v) : [...p, v])
   const toggleRegion = (v: string) => setRegions(p => p.includes(v) ? p.filter(x => x !== v) : [...p, v])
@@ -150,6 +218,72 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
     }
   }
 
+  // ── URL INPUT STEP ───────────────────────────────────────────────────────
+  const urlInputScreen = (
+    <div className="p-6 space-y-5">
+      <div className="space-y-1">
+        <label className="block text-sm font-semibold text-gray-700">Company website</label>
+        <input
+          type="url"
+          value={websiteInput}
+          onChange={e => setWebsiteInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && websiteInput.trim() && !enrichLoading) runEnrich() }}
+          placeholder="https://yourcompany.com"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          disabled={enrichLoading}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <label className="block text-sm font-semibold text-gray-700">
+          LinkedIn company page <span className="text-gray-400 font-normal">(optional)</span>
+        </label>
+        <input
+          type="url"
+          value={linkedinInput}
+          onChange={e => setLinkedinInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && websiteInput.trim() && !enrichLoading) runEnrich() }}
+          placeholder="https://linkedin.com/company/... (optional)"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          disabled={enrichLoading}
+        />
+      </div>
+
+      {enrichError && (
+        <p className="text-xs text-red-600">{enrichError}</p>
+      )}
+
+      {enrichLoading ? (
+        <div className="flex items-center justify-center gap-3 py-4 text-sm text-gray-500">
+          <svg className="w-5 h-5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+          </svg>
+          <span>Analysing your website… This takes about 15 seconds.</span>
+        </div>
+      ) : (
+        <>
+          <button
+            onClick={runEnrich}
+            disabled={!websiteInput.trim()}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-3 rounded-xl text-sm font-semibold transition-colors"
+          >
+            Auto-populate my profile →
+          </button>
+
+          <div className="text-center">
+            <button
+              onClick={() => { setEnrichStep('form'); setMode('manual') }}
+              className="text-sm text-gray-500 hover:text-gray-700 hover:underline transition-colors"
+            >
+              I&apos;ll fill in manually →
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -190,53 +324,67 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
                   </svg>
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">{isFirstTime ? 'Opportunity search preferences' : 'Update search preferences'}</h2>
-                  <p className="text-xs text-gray-500">{isFirstTime ? 'You can update this any time from the Opportunities page.' : 'Refine your preferences — your existing opportunities list won\'t be affected.'}</p>
+                  {enrichStep === 'url_input' ? (
+                    <>
+                      <h2 className="text-base font-bold text-gray-900">Let&apos;s get to know your company</h2>
+                      <p className="text-xs text-gray-500">Paste your website or LinkedIn URL and we&apos;ll fill in your profile automatically.</p>
+                    </>
+                  ) : (
+                    <>
+                      <h2 className="text-base font-bold text-gray-900">{isFirstTime ? 'Opportunity search preferences' : 'Update search preferences'}</h2>
+                      <p className="text-xs text-gray-500">{isFirstTime ? 'You can update this any time from the Opportunities page.' : 'Refine your preferences — your existing opportunities list won\'t be affected.'}</p>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Context banner */}
-              {isFirstTime && !hasExistingPrefs ? (
-                <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mb-4 text-xs text-blue-700 leading-relaxed">
-                  <strong className="font-semibold">What are Opportunities?</strong> The AI continuously searches the web for conferences, summits, and industry events that match your company profile — scoring each one for strategic fit, audience quality, and speaking potential. Set your profile below so results are tailored to you.
-                </div>
-              ) : !isFirstTime ? (
-                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-4 text-xs text-gray-600 leading-relaxed flex items-start gap-2">
-                  <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                  <span><strong className="font-semibold text-gray-700">Your existing opportunities won't be changed.</strong> Updating preferences only affects future searches — events already in your list stay exactly as they are.</span>
-                </div>
-              ) : null}
+              {/* Context banner — only show on form step */}
+              {enrichStep === 'form' && (
+                <>
+                  {isFirstTime && !hasExistingPrefs ? (
+                    <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mb-4 text-xs text-blue-700 leading-relaxed">
+                      <strong className="font-semibold">What are Opportunities?</strong> The AI continuously searches the web for conferences, summits, and industry events that match your company profile — scoring each one for strategic fit, audience quality, and speaking potential. Set your profile below so results are tailored to you.
+                    </div>
+                  ) : !isFirstTime ? (
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-4 text-xs text-gray-600 leading-relaxed flex items-start gap-2">
+                      <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                      </svg>
+                      <span><strong className="font-semibold text-gray-700">Your existing opportunities won&apos;t be changed.</strong> Updating preferences only affects future searches — events already in your list stay exactly as they are.</span>
+                    </div>
+                  ) : null}
 
-              {/* Mode toggle */}
-              {!loadingPrefs && (
-                <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-                  <button
-                    onClick={() => setMode('ai')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 transition-colors ${mode === 'ai' ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                    </svg>
-                    {hasExistingPrefs ? 'Re-fill with AI' : 'Fill with AI'}
-                  </button>
-                  <button
-                    onClick={() => setMode('manual')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 transition-colors border-l border-gray-200 ${mode === 'manual' ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                    </svg>
-                    Fill manually
-                  </button>
-                </div>
+                  {/* Mode toggle */}
+                  {!loadingPrefs && (
+                    <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+                      <button
+                        onClick={() => setMode('ai')}
+                        className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 transition-colors ${mode === 'ai' ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                        {hasExistingPrefs ? 'Re-fill with AI' : 'Fill with AI'}
+                      </button>
+                      <button
+                        onClick={() => setMode('manual')}
+                        className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 transition-colors border-l border-gray-200 ${mode === 'manual' ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                        </svg>
+                        Fill manually
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
             {loadingPrefs ? (
               <div className="p-10 text-center text-sm text-gray-400">Loading…</div>
-            ) : mode === 'ai' ? (
+            ) : enrichStep === 'url_input' ? urlInputScreen
+            : mode === 'ai' ? (
               /* ── AI MODE ─────────────────────────────────────────── */
               <div className="p-6 space-y-4">
                 <div className="bg-violet-50 border border-violet-200 rounded-xl p-4">
@@ -286,14 +434,21 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
             ) : (
               /* ── MANUAL MODE ─────────────────────────────────────── */
               <div className="p-6 space-y-5">
-                {hasExistingPrefs && (
+                {enrichedFrom ? (
+                  <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2.5 text-xs text-green-700 flex items-center gap-2">
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
+                    </svg>
+                    Profile auto-populated from {enrichedFrom} — review and confirm below.
+                  </div>
+                ) : hasExistingPrefs ? (
                   <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-700 flex items-center gap-2">
                     <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
                     </svg>
                     Pre-filled from your existing preferences — edit any field and save to update.
                   </div>
-                )}
+                ) : null}
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Your name</label>
@@ -432,7 +587,14 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
               </div>
             )}
 
-            {mode === 'manual' && (
+            {enrichStep === 'url_input' && !enrichLoading && (
+              <div className="px-6 pb-6">
+                <button onClick={onClose} className="w-full px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                  {closeLabel}
+                </button>
+              </div>
+            )}
+            {enrichStep === 'form' && mode === 'manual' && (
               <div className="px-6 pb-6 flex gap-3">
                 <button onClick={save} disabled={saving || loadingPrefs || !companyName.trim()}
                   className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors">
@@ -443,7 +605,7 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
                 </button>
               </div>
             )}
-            {mode === 'ai' && (
+            {enrichStep === 'form' && mode === 'ai' && (
               <div className="px-6 pb-6">
                 <button onClick={onClose} className="w-full px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
                   {closeLabel}
