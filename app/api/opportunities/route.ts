@@ -29,7 +29,19 @@ export async function POST(req: NextRequest) {
     const settingsRows = db.prepare('SELECT key, value FROM app_settings').all() as { key: string; value: string }[]
     const settings: Record<string, string> = {}
     settingsRows.forEach(r => { settings[r.key] = r.value })
-    const userCompany = settings.opp_company_name || ''
+
+    // Parse company_profiles and build companiesContext
+    let companyProfiles: Array<{ id: string; name: string; website_url: string; description?: string }> = []
+    if (settings.company_profiles) {
+      try { companyProfiles = JSON.parse(settings.company_profiles) } catch {}
+    }
+    let companiesContext = ''
+    if (companyProfiles.length > 0) {
+      companiesContext = companyProfiles.length === 1
+        ? companyProfiles[0].name
+        : companyProfiles.map(c => c.name).join(', ')
+    }
+    const userCompany = companiesContext || settings.opp_company_name || ''
     const userBrands = settings.opp_brands || ''
     const userSpeaker = settings.opp_speaker_name || ''
     const userCustomerProfile = settings.opp_customer_profile || ''
@@ -137,11 +149,18 @@ Use web search to actively discover events not listed here — especially newly 
     }
 
     // Build user-preferences section if configured
+    const companyPortfolioSection = companyProfiles.length > 1
+      ? `COMPANY PORTFOLIO:
+${companyProfiles.map(c => `- ${c.name}${c.description ? ` — ${c.description}` : ''}`).join('\n')}
+
+Score and evaluate opportunities for relevance across this entire portfolio. Note which company or companies benefit most from each event.`
+      : `Company / organization: ${userCompany}`
+
     const userPrefsSection = userCompany ? `
 ═══════════════════════════════════════════════════
 USER-CONFIGURED SEARCH PREFERENCES (use these to tailor results)
 ═══════════════════════════════════════════════════
-Company / organization: ${userCompany}
+${companyPortfolioSection}
 ${userBrands ? `Products / brands: ${userBrands}` : ''}
 ${userSpeaker ? `Executive speaker: ${userSpeaker}` : ''}
 ${userCustomerProfile ? `Target customer profile: ${userCustomerProfile}` : ''}

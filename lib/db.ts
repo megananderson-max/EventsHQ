@@ -183,6 +183,8 @@ function initSchema(db: Database.Database) {
   try { db.exec(`ALTER TABLE opportunities ADD COLUMN dna_notes TEXT`) } catch {}
   try { db.exec(`ALTER TABLE opportunities ADD COLUMN is_competitor_event INTEGER DEFAULT 0`) } catch {}
   try { db.exec(`ALTER TABLE opportunities ADD COLUMN competitor_name TEXT`) } catch {}
+  // Migrate: add company_profiles JSON column to app_settings
+  try { db.exec("ALTER TABLE app_settings ADD COLUMN company_profiles TEXT") } catch {}
   // Migrate: add role column to team_members
   try { db.exec(`ALTER TABLE team_members ADD COLUMN role TEXT DEFAULT 'user'`) } catch {}
   // Migrate: add first_name + last_name to team_members (older DBs)

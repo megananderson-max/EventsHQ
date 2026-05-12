@@ -26,6 +26,13 @@ const REGION_OPTIONS = [
   { val: 'global',         label: 'Global / Virtual' },
 ]
 
+type CompanyProfile = {
+  id: string
+  name: string
+  website_url: string
+  description?: string
+}
+
 interface Props {
   onClose: () => void
   onSaved: () => void
@@ -39,7 +46,9 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
   const [aiDescription, setAiDescription]             = useState('')
   const [aiLoading, setAiLoading]                     = useState(false)
   const [aiError, setAiError]                         = useState<string | null>(null)
+  // Keep companyName for backward compat (AI mode still sets it; single-company users still work)
   const [companyName, setCompanyName]                 = useState('')
+  const [companies, setCompanies]                     = useState<CompanyProfile[]>([])
   const [brands, setBrands]                           = useState('')
   const [speakerName, setSpeakerName]                 = useState('')
   const [customerProfile, setCustomerProfile]         = useState('')
@@ -52,6 +61,13 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
   const [loadingPrefs, setLoadingPrefs]               = useState(true)
   const [hasExistingPrefs, setHasExistingPrefs]       = useState(false)
 
+  // Add-company inline form
+  const [addingCompany, setAddingCompany]             = useState(false)
+  const [newCompanyName, setNewCompanyName]           = useState('')
+  const [newCompanyUrl, setNewCompanyUrl]             = useState('')
+  const [newCompanyEnriching, setNewCompanyEnriching] = useState(false)
+  const [newCompanyError, setNewCompanyError]         = useState('')
+
   // URL auto-populate step
   const [enrichStep, setEnrichStep]                   = useState<'url_input' | 'form'>('url_input')
   const [websiteInput, setWebsiteInput]               = useState('')
@@ -63,15 +79,29 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
   useEffect(() => {
     fetch('/api/settings')
       .then(r => r.json())
-      .then((s: Record<string, string>) => {
-        if (s.user_name)             setYourName(s.user_name)
-        if (s.opp_company_name)      { setCompanyName(s.opp_company_name); setHasExistingPrefs(true) }
-        if (s.opp_brands)            setBrands(s.opp_brands)
-        if (s.opp_speaker_name)      setSpeakerName(s.opp_speaker_name)
-        if (s.opp_customer_profile)  setCustomerProfile(s.opp_customer_profile)
-        if (s.opp_focus_areas)       setFocusAreas(s.opp_focus_areas.split(',').filter(Boolean))
-        if (s.opp_regions)           setRegions(s.opp_regions.split(',').filter(Boolean))
-        if (s.opp_company_name)      setMode('manual')
+      .then((s: Record<string, unknown>) => {
+        if (typeof s.user_name === 'string' && s.user_name)        setYourName(s.user_name)
+        if (typeof s.opp_company_name === 'string' && s.opp_company_name) {
+          setCompanyName(s.opp_company_name)
+          setHasExistingPrefs(true)
+        }
+        if (typeof s.opp_brands === 'string' && s.opp_brands)           setBrands(s.opp_brands)
+        if (typeof s.opp_speaker_name === 'string' && s.opp_speaker_name) setSpeakerName(s.opp_speaker_name)
+        if (typeof s.opp_customer_profile === 'string' && s.opp_customer_profile) setCustomerProfile(s.opp_customer_profile)
+        if (typeof s.opp_focus_areas === 'string' && s.opp_focus_areas) setFocusAreas(s.opp_focus_areas.split(',').filter(Boolean))
+        if (typeof s.opp_regions === 'string' && s.opp_regions)         setRegions(s.opp_regions.split(',').filter(Boolean))
+        if (typeof s.opp_company_name === 'string' && s.opp_company_name) setMode('manual')
+
+        // Load company profiles — backward compat: seed from company_name if no profiles yet
+        if (Array.isArray(s.company_profiles) && s.company_profiles.length > 0) {
+          setCompanies(s.company_profiles as CompanyProfile[])
+        } else if (typeof s.opp_company_name === 'string' && s.opp_company_name) {
+          setCompanies([{
+            id: '1',
+            name: s.opp_company_name,
+            website_url: typeof s.website_url === 'string' ? s.website_url : '',
+          }])
+        }
       })
       .catch(() => {})
       .finally(() => setLoadingPrefs(false))
@@ -108,7 +138,8 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       }
       if (!res.ok || !data.success) throw new Error(data.error || 'Auto-populate failed')
       const p = data.profile!
-      if (p.company_name)      setCompanyName(p.company_name)
+      const enrichedName = p.company_name || ''
+      if (enrichedName) setCompanyName(enrichedName)
       if (p.company_description) setCustomerProfile(p.company_description)
       if (Array.isArray(p.focus_areas) && p.focus_areas.length) {
         setFocusAreas(p.focus_areas.filter(v => VALID_FOCUS_AREAS.includes(v)))
@@ -117,6 +148,17 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
         setRegions(p.regions.filter(v => VALID_REGIONS.includes(v)))
       }
       if (p.speaker_name) setSpeakerName(p.speaker_name)
+
+      // Add enriched company as first entry in companies list
+      if (enrichedName || websiteInput.trim()) {
+        const newCompany: CompanyProfile = {
+          id: Date.now().toString(),
+          name: enrichedName || websiteInput.trim(),
+          website_url: websiteInput.trim(),
+          description: p.company_description,
+        }
+        setCompanies([newCompany])
+      }
 
       // Extract domain for the banner
       try {
@@ -149,7 +191,10 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'AI assist failed')
-      if (data.company_name)     setCompanyName(data.company_name)
+      if (data.company_name)     {
+        setCompanyName(data.company_name)
+        setCompanies([{ id: Date.now().toString(), name: data.company_name, website_url: '' }])
+      }
       if (data.brands)           setBrands(data.brands)
       if (data.speaker_name)     { setSpeakerName(data.speaker_name); if (!yourName) setYourName(data.speaker_name) }
       if (data.user_name)        setYourName(data.user_name)
@@ -164,8 +209,75 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
     }
   }
 
+  const removeCompany = (id: string) => {
+    setCompanies(prev => prev.filter(c => c.id !== id))
+  }
+
+  const addCompanyManually = () => {
+    if (!newCompanyName.trim()) return
+    const company: CompanyProfile = {
+      id: Date.now().toString(),
+      name: newCompanyName.trim(),
+      website_url: newCompanyUrl.trim(),
+    }
+    setCompanies(prev => [...prev, company])
+    setNewCompanyName('')
+    setNewCompanyUrl('')
+    setAddingCompany(false)
+    setNewCompanyError('')
+  }
+
+  const addCompanyViaEnrich = async () => {
+    if (!newCompanyUrl.trim()) {
+      setNewCompanyError('Please enter a website URL first')
+      return
+    }
+    setNewCompanyEnriching(true)
+    setNewCompanyError('')
+    try {
+      const res = await fetch('/api/enrich-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ websiteUrl: newCompanyUrl.trim() }),
+      })
+      const data = await res.json() as {
+        success: boolean
+        error?: string
+        profile?: {
+          company_name?: string
+          company_description?: string
+        }
+      }
+      if (!res.ok || !data.success) throw new Error(data.error || 'Auto-populate failed')
+      const p = data.profile!
+      const resolvedName = newCompanyName.trim() || p.company_name || newCompanyUrl.trim()
+      const company: CompanyProfile = {
+        id: Date.now().toString(),
+        name: resolvedName,
+        website_url: newCompanyUrl.trim(),
+        description: p.company_description,
+      }
+      setCompanies(prev => [...prev, company])
+      setNewCompanyName('')
+      setNewCompanyUrl('')
+      setAddingCompany(false)
+      setNewCompanyError('')
+    } catch (e) {
+      setNewCompanyError(e instanceof Error ? e.message : 'Auto-populate failed')
+    } finally {
+      setNewCompanyEnriching(false)
+    }
+  }
+
+  const getDomain = (url: string) => {
+    if (!url) return ''
+    try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url }
+  }
+
   const save = async () => {
-    if (!companyName.trim()) return
+    // Require at least one company or a legacy companyName
+    const effectiveCompanyName = companies[0]?.name || companyName.trim()
+    if (!effectiveCompanyName) return
     setSaving(true)
     await fetch('/api/settings', {
       method: 'PUT',
@@ -173,12 +285,13 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       body: JSON.stringify({
         opp_prefs_configured: 'true',
         user_name: yourName.trim(),
-        opp_company_name: companyName.trim(),
+        opp_company_name: effectiveCompanyName,
         opp_brands: brands.trim(),
         opp_speaker_name: speakerName.trim(),
         opp_customer_profile: customerProfile.trim(),
         opp_focus_areas: focusAreas.join(','),
         opp_regions: regions.join(','),
+        company_profiles: companies,
       }),
     })
 
@@ -217,6 +330,8 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       onSaved()
     }
   }
+
+  const canSave = companies.length > 0 || companyName.trim().length > 0
 
   // ── URL INPUT STEP ───────────────────────────────────────────────────────
   const urlInputScreen = (
@@ -457,13 +572,106 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
                 </div>
 
+                {/* ── YOUR COMPANIES ───────────────────────────────── */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Company / organization name <span className="text-red-500">*</span>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Your Companies <span className="text-red-500">*</span>
                   </label>
-                  <input value={companyName} onChange={e => setCompanyName(e.target.value)}
-                    placeholder="e.g. Acme Corp"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+
+                  {companies.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic mb-2">No companies added yet.</p>
+                  ) : (
+                    <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-2">
+                      {companies.map(company => (
+                        <div key={company.id} className="flex items-center justify-between px-3 py-2.5 gap-3">
+                          <div className="min-w-0 flex-1">
+                            <span className="text-sm font-medium text-gray-900 truncate block">{company.name}</span>
+                            {company.website_url && (
+                              <span className="text-xs text-gray-400 truncate block">{getDomain(company.website_url)}</span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeCompany(company.id)}
+                            className="flex-shrink-0 text-gray-300 hover:text-red-500 transition-colors"
+                            aria-label={`Remove ${company.name}`}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add company inline form */}
+                  {addingCompany ? (
+                    <div className="border border-violet-200 rounded-lg p-3 space-y-2 bg-violet-50">
+                      <input
+                        value={newCompanyName}
+                        onChange={e => setNewCompanyName(e.target.value)}
+                        placeholder="Company name"
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                      />
+                      <input
+                        type="url"
+                        value={newCompanyUrl}
+                        onChange={e => setNewCompanyUrl(e.target.value)}
+                        placeholder="Website URL (e.g. https://acme.com)"
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                      />
+                      {newCompanyError && (
+                        <p className="text-xs text-red-600">{newCompanyError}</p>
+                      )}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={addCompanyViaEnrich}
+                          disabled={newCompanyEnriching || !newCompanyUrl.trim()}
+                          className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                        >
+                          {newCompanyEnriching ? (
+                            <>
+                              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                              </svg>
+                              Enriching…
+                            </>
+                          ) : (
+                            <>✨ Auto-populate from URL</>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={addCompanyManually}
+                          disabled={!newCompanyName.trim()}
+                          className="flex items-center gap-1.5 border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                        >
+                          Add manually
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setAddingCompany(false); setNewCompanyName(''); setNewCompanyUrl(''); setNewCompanyError('') }}
+                          className="text-xs text-gray-400 hover:text-gray-600 hover:underline"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setAddingCompany(true)}
+                      className="flex items-center gap-1.5 text-sm text-violet-600 hover:text-violet-800 font-medium transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                      </svg>
+                      Add company
+                    </button>
+                  )}
                 </div>
 
                 <div>
@@ -596,7 +804,7 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
             )}
             {enrichStep === 'form' && mode === 'manual' && (
               <div className="px-6 pb-6 flex gap-3">
-                <button onClick={save} disabled={saving || loadingPrefs || !companyName.trim()}
+                <button onClick={save} disabled={saving || loadingPrefs || !canSave}
                   className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors">
                   {saving ? 'Saving…' : isFirstTime ? 'Save preferences' : 'Update preferences'}
                 </button>
