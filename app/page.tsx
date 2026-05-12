@@ -116,7 +116,7 @@ export default function Dashboard() {
           e.end_date &&
           e.end_date < today &&
           e.end_date > thirtyDaysAgo &&
-          (e.status === 'confirmed' || e.status === 'complete') &&
+          (e.status === 'active' || e.status === 'complete' || e.status === 'planning') &&
           !(e as Event & { post_event_completed?: number }).post_event_completed
         )
         setEventsNeedingOutcomes(needsOutcomes)
