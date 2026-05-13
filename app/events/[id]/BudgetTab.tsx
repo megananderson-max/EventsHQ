@@ -360,6 +360,8 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  const today = new Date().toISOString().split('T')[0]
+
   // Split into confirmed and estimated, then group each by category
   const confirmedItems = items.filter(i => !i.is_estimate)
   const estimatedItems = items.filter(i => !!i.is_estimate)
@@ -561,7 +563,23 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
         {loading ? (
           <div className="p-8 text-center text-gray-400">Loading...</div>
         ) : items.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">No budget items yet. Click &quot;Add Line Item&quot; to get started.</div>
+          <div className="p-8 text-center text-gray-400 flex flex-col items-center">
+            <span>No budget items yet. Click &quot;Add Line Item&quot; to get started.</span>
+            <button
+              onClick={runAiBudget}
+              disabled={aiLoading}
+              className="mt-3 flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              {aiLoading ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  Generating…
+                </>
+              ) : (
+                '✨ Generate with AI'
+              )}
+            </button>
+          </div>
         ) : (
           <div>
             {/* Confirmed / Contracted Costs */}
@@ -618,6 +636,9 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
                                       <span className="text-xs text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded font-mono" title="Original GBP amount, converted at 1.26 USD/GBP">
                                         {extractGBP(item.notes)} GBP
                                       </span>
+                                    )}
+                                    {item.payment_due_date && item.payment_due_date < today && item.status !== 'paid' && (
+                                      <span className="ml-2 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">Payment overdue</span>
                                     )}
                                   </span>
                                 </td>
@@ -724,6 +745,9 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
                                       <span className="text-xs text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded font-mono" title="Original GBP amount, converted at 1.26 USD/GBP">
                                         {extractGBP(item.notes)} GBP
                                       </span>
+                                    )}
+                                    {item.payment_due_date && item.payment_due_date < today && item.status !== 'paid' && (
+                                      <span className="ml-2 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">Payment overdue</span>
                                     )}
                                   </span>
                                 </td>

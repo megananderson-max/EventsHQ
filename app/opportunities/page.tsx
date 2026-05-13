@@ -44,6 +44,41 @@ function fmt(n: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0)
 }
 
+function daysUntil(dateStr: string): number {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const target = new Date(dateStr + 'T00:00:00')
+  return Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function DaysUntilBadge({ dateStr }: { dateStr: string }) {
+  const days = daysUntil(dateStr)
+  let label: string
+  let className: string
+  if (days < 0) {
+    label = 'passed'
+    className = 'bg-gray-100 text-gray-400'
+  } else if (days === 0) {
+    label = 'today'
+    className = 'bg-red-100 text-red-700'
+  } else if (days <= 14) {
+    label = `in ${days} days — urgent`
+    className = 'bg-red-100 text-red-700'
+  } else if (days <= 30) {
+    label = `in ${days} days — decide soon`
+    className = 'bg-amber-100 text-amber-700'
+  } else if (days <= 60) {
+    label = `in ${days} days`
+    className = 'bg-blue-100 text-blue-700'
+  } else {
+    label = `in ${days} days`
+    className = 'bg-gray-100 text-gray-500'
+  }
+  return (
+    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${className}`}>{label}</span>
+  )
+}
+
 function downloadCSV(filename: string, rows: string[][], headers: string[]) {
   const lines = [headers, ...rows].map(r => r.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
@@ -1526,6 +1561,7 @@ export default function OpportunitiesPage() {
                     </div>
                     <div className="flex flex-wrap gap-3 text-xs text-gray-500 mb-3">
                       {opp.start_date && <span>📅 {new Date(opp.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+                      {opp.start_date && <DaysUntilBadge dateStr={opp.start_date} />}
                       {opp.location && <span>📍 {opp.location}</span>}
                       {(opp.budget_estimate_low || opp.budget_estimate_high) && (
                         <span>💰 {opp.budget_estimate_low && opp.budget_estimate_high ? `${fmt(opp.budget_estimate_low)} – ${fmt(opp.budget_estimate_high)}` : fmt(opp.budget_estimate_high || opp.budget_estimate_low || 0)}</span>

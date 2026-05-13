@@ -72,6 +72,20 @@ export default function EventDetailPage() {
   // Auto-open AI import modal when coming from post-event notification
   useEffect(() => {
     if (searchParams.get('upload') === '1') setAiSetupOpen(true)
+    // NEW: honour ?tab= param to open a specific tab directly
+    const tabParam = searchParams.get('tab')
+    if (tabParam) {
+      const TAB_MAP: Record<string, string> = {
+        planning: 'Planning',
+        vendors: 'Vendors',
+        budget: 'Budget',
+        outcomes: 'Outcomes',
+        overview: 'Overview',
+        execution: 'Execution',
+      }
+      const mapped = TAB_MAP[tabParam.toLowerCase()]
+      if (mapped) setActiveTab(mapped as Tab)
+    }
   }, [searchParams])
 
   const addUrlField = () => setImportUrls(u => [...u, ''])

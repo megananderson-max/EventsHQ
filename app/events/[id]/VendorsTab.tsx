@@ -60,6 +60,7 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
   const [vendorSearch, setVendorSearch] = useState('')
   const [showNewVendorForm, setShowNewVendorForm] = useState(false)
   const [newVendorForm, setNewVendorForm] = useState({ name: '', category: 'sponsorship', contact_name: '', contact_email: '', contact_phone: '' })
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
   const { sortKey, sortDir, toggle } = useSortState<'name' | 'category'>('name')
 
   const fetchVendors = () => {
@@ -124,9 +125,9 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
     fetchVendors()
   }
 
-  const remove = async (id: number, name: string) => {
-    if (!confirm(`Remove "${name}" from this event?`)) return
+  const remove = async (id: number) => {
     await fetch(`/api/events/${eventId}/vendors/${id}`, { method: 'DELETE' })
+    setPendingDeleteId(null)
     fetchVendors()
   }
 
@@ -193,7 +194,14 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-3">
                       <button onClick={() => openEdit(ev)} className="text-blue-500 hover:text-blue-700 text-sm font-medium">Edit</button>
-                      <button onClick={() => remove(ev.id, ev.vendor_name)} className="text-red-400 hover:text-red-600 text-sm font-medium">Remove</button>
+                      {pendingDeleteId === ev.id ? (
+                        <>
+                          <button onClick={() => remove(ev.id)} className="bg-red-500 hover:bg-red-600 text-white px-2 py-0.5 rounded text-xs font-medium">Confirm remove</button>
+                          <button onClick={() => setPendingDeleteId(null)} className="text-gray-400 hover:text-gray-600 text-xs font-medium">Cancel</button>
+                        </>
+                      ) : (
+                        <button onClick={() => setPendingDeleteId(ev.id)} className="text-red-400 hover:text-red-600 text-sm font-medium">Remove</button>
+                      )}
                     </div>
                   </td>
                 </tr>

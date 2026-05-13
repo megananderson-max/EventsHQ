@@ -407,6 +407,7 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
   const pct = items.length > 0 ? Math.round((done.length / items.length) * 100) : 0
   const overdueCount = todo.filter(i => i.due_date && daysUntil(i.due_date) < 0).length
   const dueSoonCount = todo.filter(i => i.due_date && daysUntil(i.due_date) >= 0 && daysUntil(i.due_date) <= 7).length
+  const unassignedCount = items.filter(i => !i.assigned_to && i.status !== 'complete' && !i.done).length
   const daysUntilEvent = eventStartDate ? daysUntil(eventStartDate) : null
   const openTaskCount = items.filter(i => i.status !== 'complete' && !i.done).length
 
@@ -534,7 +535,7 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
               <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }} />
             </div>
           </div>
-          {(overdueCount > 0 || dueSoonCount > 0) && (
+          {(overdueCount > 0 || dueSoonCount > 0 || unassignedCount > 0) && (
             <div className="flex gap-2 flex-shrink-0">
               {overdueCount > 0 && (
                 <span className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-full px-2.5 py-0.5 font-medium">
@@ -544,6 +545,11 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
               {dueSoonCount > 0 && (
                 <span className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-full px-2.5 py-0.5 font-medium">
                   🕐 {dueSoonCount} due this week
+                </span>
+              )}
+              {unassignedCount > 0 && (
+                <span className="text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
+                  {unassignedCount} unassigned
                 </span>
               )}
             </div>

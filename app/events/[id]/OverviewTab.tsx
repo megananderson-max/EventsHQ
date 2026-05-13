@@ -306,9 +306,12 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
           <div className="flex-1 min-w-0">
             <p className="text-sm text-slate-700">Post-event: Log your outcomes to measure ROI</p>
           </div>
-          <a href="?tab=outcomes" className="flex-shrink-0 text-sm font-medium text-slate-600 hover:text-slate-900">
+          <button
+            onClick={() => onTabChange?.('Outcomes')}
+            className="text-sm font-medium text-slate-700 hover:text-slate-900 underline underline-offset-2"
+          >
             Go to Outcomes →
-          </a>
+          </button>
           <button
             onClick={() => setOutcomeNudgeDismissed(true)}
             className="flex-shrink-0 text-slate-400 hover:text-slate-600"
@@ -374,9 +377,9 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
 
       {/* Key Metrics */}
       <div className="grid grid-cols-3 gap-4">
-        <MetricCard label="Budget Used" value={`${budgetUsedPct}%`} sub={`${formatCurrency(totalActual)} of ${formatCurrency(event.budget_total || 0)}`} color={budgetUsedPct > 100 ? 'red' : 'green'} onClick={() => onTabChange?.('Budget')} hint="View Budget →" />
+        <MetricCard label="Budget Used" value={`${budgetUsedPct}%`} sub={`${formatCurrency(totalActual)} of ${formatCurrency(event.budget_total || 0)}`} color={budgetUsedPct > 100 ? 'red' : 'green'} onClick={() => onTabChange?.('Budget')} hint={totalActual === 0 && totalPlanned === 0 ? 'Set up budget →' : 'View Budget →'} />
         <MetricCard label="Vendors" value={vendorCount.toString()} sub="attached to event" color="blue" onClick={() => onTabChange?.('Vendors')} hint="View Vendors →" />
-        <MetricCard label="Tasks Done" value={`${taskStats.total ? Math.round((taskStats.done / taskStats.total) * 100) : 0}%`} sub={`${taskStats.done} of ${taskStats.total} tasks`} color="purple" onClick={() => onTabChange?.('Planning')} hint="View Planning →" />
+        <MetricCard label="Tasks Done" value={`${taskStats.total ? Math.round((taskStats.done / taskStats.total) * 100) : 0}%`} sub={`${taskStats.done} of ${taskStats.total} tasks`} color="purple" onClick={() => onTabChange?.('Planning')} hint={taskStats.total === 0 ? 'Add tasks →' : 'View Planning →'} />
       </div>
 
       {/* Budget Breakdown */}

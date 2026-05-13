@@ -269,6 +269,21 @@ export default function PlanningPage() {
                       {new Date(group.event_start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
                   )}
+                  {(() => {
+                    const s = group.event_status
+                    const label = s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
+                    const color =
+                      s === 'planning'  ? 'bg-yellow-100 text-yellow-700' :
+                      s === 'active'    ? 'bg-green-100 text-green-700' :
+                      s === 'complete'  ? 'bg-gray-100 text-gray-600' :
+                      s === 'cancelled' ? 'bg-red-100 text-red-600' :
+                                          'bg-gray-100 text-gray-600'
+                    return (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${color}`}>
+                        {label}
+                      </span>
+                    )
+                  })()}
                 </div>
 
                 {!isCollapsed && (
