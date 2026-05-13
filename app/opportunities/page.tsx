@@ -119,12 +119,13 @@ export default function OpportunitiesPage() {
     error?: string
   }
   const [confirming, setConfirming] = useState<ConfirmState | null>(null)
-  const [pageTab, setPageTab] = useState<'all' | 'opportunities' | 'under_review' | 'do_not_attend'>(() => {
+  const [pageTab, setPageTab] = useState<'all' | 'opportunities' | 'under_review' | 'do_not_attend' | 'archived'>(() => {
     if (typeof window !== 'undefined') {
       const t = new URLSearchParams(window.location.search).get('tab')
       if (t === 'all') return 'all'
       if (t === 'under_review') return 'under_review'
       if (t === 'do_not_attend') return 'do_not_attend'
+      if (t === 'archived') return 'archived'
     }
     return 'opportunities'
   })
@@ -152,6 +153,7 @@ export default function OpportunitiesPage() {
     if (tab === 'all') setPageTab('all')
     else if (tab === 'under_review') setPageTab('under_review')
     else if (tab === 'do_not_attend') setPageTab('do_not_attend')
+    else if (tab === 'archived') setPageTab('archived')
     else if (!tab) setPageTab('opportunities')
   }, [searchParams])
 
@@ -324,6 +326,28 @@ export default function OpportunitiesPage() {
     setOpportunities(prev => prev.map(o => o.id === opp.id ? { ...o, status: 'pipeline' } : o))
   }
 
+  const archiveOpp = async (opp: Opportunity) => {
+    await fetch(`/api/opportunities/${opp.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'archived' })
+    }).catch(() => {})
+    setOpportunities(prev => prev.map(o => o.id === opp.id ? { ...o, status: 'archived' } : o))
+    setToast(`"${opp.name}" archived`)
+    setTimeout(() => setToast(null), 3000)
+  }
+
+  const restoreFromArchive = async (opp: Opportunity) => {
+    await fetch(`/api/opportunities/${opp.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'pipeline' })
+    }).catch(() => {})
+    setOpportunities(prev => prev.map(o => o.id === opp.id ? { ...o, status: 'pipeline' } : o))
+    setToast(`"${opp.name}" restored to pipeline`)
+    setTimeout(() => setToast(null), 3000)
+  }
+
   const moveToDoNotAttend = (opp: Opportunity) => {
     setDnaDraft({ isCompetitor: !!(opp.is_competitor_event), competitorName: opp.competitor_name || '', notes: '' })
     setDnaModal({ opp })
@@ -489,16 +513,17 @@ export default function OpportunitiesPage() {
   }
 
   // Partition into tabs
-  const pipelineOpps = opportunities.filter(o => o.status !== 'pending_approval' && o.status !== 'do_not_attend' && !o.added_to_events)
+  const pipelineOpps = opportunities.filter(o => o.status !== 'pending_approval' && o.status !== 'do_not_attend' && o.status !== 'archived' && !o.added_to_events)
   const underReviewOpps = opportunities.filter(o => o.status === 'pending_approval') // raw — used for count badge
   const doNotAttendOpps = opportunities.filter(o => o.status === 'do_not_attend').sort((a, b) => a.name.localeCompare(b.name))
+  const archivedOpps = opportunities.filter(o => o.status === 'archived').sort((a, b) => a.name.localeCompare(b.name))
 
   // All tab: filter + sort
   const allTabBaseOpps = opportunities.filter(o => {
     if (allTabFilter === 'pipeline') return o.status !== 'pending_approval' && o.status !== 'do_not_attend' && !o.added_to_events
     if (allTabFilter === 'pending_approval') return o.status === 'pending_approval'
     if (allTabFilter === 'do_not_attend') return o.status === 'do_not_attend'
-    return !o.added_to_events // 'all' — exclude confirmed events
+    return !o.added_to_events && o.status !== 'archived' // 'all' — exclude confirmed events and archived
   })
   const allTabOpps = allTabBaseOpps
     .filter(o => {
@@ -1185,6 +1210,17 @@ export default function OpportunitiesPage() {
           <span className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${pageTab === 'do_not_attend' ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-500'}`}>{doNotAttendOpps.length}</span>
           <Tooltip text="Permanently excluded events. These will not resurface in AI scans." icon position="bottom" />
         </button>
+        {archivedOpps.length > 0 && (
+          <button
+            onClick={() => { setPageTab('archived'); router.replace('/opportunities?tab=archived', { scroll: false }) }}
+            className={`flex items-center gap-2 px-1 pb-3 text-sm font-medium border-b-2 -mb-px transition-all ${pageTab === 'archived' ? 'border-gray-500 text-gray-700' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M10 12v4m4-4v4"/></svg>
+            Archived
+            <span className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${pageTab === 'archived' ? 'bg-gray-200 text-gray-700' : 'bg-gray-200 text-gray-500'}`}>{archivedOpps.length}</span>
+            <Tooltip text="Past events archived for future reference. Restore to pipeline to reconsider next year." icon position="bottom" />
+          </button>
+        )}
       </div>
 
 
@@ -1473,8 +1509,8 @@ export default function OpportunitiesPage() {
                         <>
                           <span className="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full">Event date passed</span>
                           <button
-                            onClick={() => moveToDoNotAttend(opp)}
-                            className="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors"
+                            onClick={() => archiveOpp(opp)}
+                            className="text-xs bg-gray-100 text-gray-600 border border-gray-200 px-2 py-0.5 rounded-full hover:bg-gray-200 transition-colors"
                           >
                             Archive
                           </button>
@@ -1697,6 +1733,50 @@ export default function OpportunitiesPage() {
                       </button>
                     </div>
                   )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ARCHIVED TAB ──────────────────────────────────────────────────── */}
+      {pageTab === 'archived' && (
+        <div>
+          <div className="bg-gray-50 border border-gray-200 rounded-xl px-5 py-4 mb-5 flex items-start gap-3">
+            <svg className="w-5 h-5 text-gray-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M10 12v4m4-4v4"/></svg>
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Archived Opportunities</p>
+              <p className="text-xs text-gray-600 mt-0.5">Events that have passed and were archived for future reference. They won't appear in your pipeline or AI scans. Click <strong>Restore to Pipeline</strong> to reconsider any of them next year.</p>
+            </div>
+          </div>
+          {archivedOpps.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-10">No archived opportunities yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {archivedOpps.map(opp => (
+                <div key={opp.id} className="bg-white border border-gray-200 rounded-xl px-5 py-4 flex items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-800 truncate">{opp.name}</p>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                      {opp.start_date && <span>{new Date(opp.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+                      {opp.location && <span>· {opp.location}</span>}
+                      {opp.strategic_fit && <span className={`px-1.5 py-0.5 rounded-full font-medium ${opp.strategic_fit === 'High' ? 'bg-green-100 text-green-700' : opp.strategic_fit === 'Medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>{opp.strategic_fit} fit</span>}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => restoreFromArchive(opp)}
+                    className="flex-shrink-0 text-xs font-medium bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    Restore to Pipeline
+                  </button>
+                  <button
+                    onClick={() => moveToDoNotAttend(opp)}
+                    className="flex-shrink-0 text-xs font-medium text-red-600 hover:text-red-700 transition-colors"
+                    title="Move to Do Not Attend"
+                  >
+                    Do Not Attend
+                  </button>
                 </div>
               ))}
             </div>
