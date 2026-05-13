@@ -232,7 +232,19 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
                       filteredVendors.map(v => (
                         <button
                           key={v.id}
-                          onClick={() => setForm(f => ({ ...f, vendor_id: v.id.toString() }))}
+                          onClick={() => {
+                            setForm(f => ({ ...f, vendor_id: v.id.toString() }))
+                            setVendorProfile(prev => ({
+                              ...prev,
+                              name: prev.name || v.name || '',
+                              category: prev.category || v.category || 'sponsorship',
+                              contact_name: prev.contact_name || v.contact_name || '',
+                              contact_email: prev.contact_email || v.contact_email || '',
+                              contact_phone: prev.contact_phone || v.contact_phone || '',
+                              website: prev.website || v.website || '',
+                              notes: prev.notes || v.notes || '',
+                            }))
+                          }}
                           className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between ${form.vendor_id === v.id.toString() ? 'bg-blue-50' : ''}`}
                         >
                           <div>

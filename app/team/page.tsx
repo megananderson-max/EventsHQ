@@ -55,12 +55,31 @@ export default function TeamPage() {
   const [reassignTo, setReassignTo] = useState<string>('')
   const [removing, setRemoving] = useState(false)
 
+  const [taskCounts, setTaskCounts] = useState<Record<number, number>>({}) // memberId -> open task count
+  const [orphanToast, setOrphanToast] = useState<{ count: number } | null>(null)
+
   const { sortKey, sortDir, toggle } = useSortState<'name' | 'email' | 'role'>('name')
 
   const load = () =>
     fetch('/api/team-members')
       .then(r => r.json())
-      .then(d => { setMembers(d); setLoading(false) })
+      .then((d: TeamMember[]) => {
+        setMembers(d)
+        setLoading(false)
+        fetch('/api/planning')
+          .then(r => r.json())
+          .then((items: { assigned_to: string | null; status: string }[]) => {
+            const counts: Record<number, number> = {}
+            for (const member of d) {
+              const fullName = [member.first_name, member.last_name].filter(Boolean).join(' ') || member.name
+              counts[member.id] = items.filter(
+                item => item.assigned_to === fullName && item.status !== 'complete'
+              ).length
+            }
+            setTaskCounts(counts)
+          })
+          .catch(() => {})
+      })
       .catch(() => setLoading(false))
 
   useEffect(() => { load() }, [])
@@ -149,11 +168,28 @@ export default function TeamPage() {
       }
     }
 
+    // Track whether tasks were left unassigned
+    let orphanedCount = 0
+    if (reassignAction === 'unassign') {
+      try {
+        const allItems = await fetch('/api/planning').then(r => r.json()) as Array<{ assigned_to: string | null; status: string }>
+        const memberFullName = [member.first_name, member.last_name].filter(Boolean).join(' ') || member.name
+        orphanedCount = allItems.filter(item => item.assigned_to === memberFullName && item.status !== 'complete').length
+      } catch {
+        // Non-fatal
+      }
+    }
+
     // Delete the member
     await fetch(`/api/team-members/${member.id}`, { method: 'DELETE' })
     setRemoveConfirm(null)
     setRemoving(false)
     await load()
+
+    if (reassignAction === 'unassign' && orphanedCount > 0) {
+      setOrphanToast({ count: orphanedCount })
+      setTimeout(() => setOrphanToast(null), 8000)
+    }
   }
 
   const addMember = async () => {
@@ -289,7 +325,14 @@ export default function TeamPage() {
                   ) : (
                     <>
                       <td className="px-5 py-3">
-                        <span className="text-sm font-medium text-gray-900">{m.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900">{m.name}</span>
+                          {(taskCounts[m.id] ?? 0) > 0 && (
+                            <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full">
+                              {taskCounts[m.id]} tasks
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-3">
                         {m.email ? (
@@ -413,6 +456,15 @@ export default function TeamPage() {
         {addError && <p className="text-xs text-red-500 mt-2">{addError}</p>}
         <p className="text-xs text-gray-400 mt-3">Team members appear in the assignee dropdown when creating or editing tasks. Only one person can be marked <strong>Me</strong> at a time.</p>
       </div>
+
+      {/* Orphan tasks toast */}
+      {orphanToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-amber-600 text-white text-sm px-4 py-3 rounded-xl shadow-lg">
+          <span>{orphanToast.count} {orphanToast.count === 1 ? 'task is' : 'tasks are'} now unassigned —</span>
+          <a href="/planning" className="underline font-semibold hover:text-amber-100 whitespace-nowrap">View tasks →</a>
+          <button onClick={() => setOrphanToast(null)} className="ml-1 text-amber-200 hover:text-white">✕</button>
+        </div>
+      )}
 
       {/* Remove Confirm Modal */}
       {removeConfirm && (

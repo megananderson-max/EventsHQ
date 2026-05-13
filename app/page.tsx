@@ -167,6 +167,8 @@ export default function Dashboard() {
   const { sortKey: evtKey, sortDir: evtDir, toggle: evtToggle } = useSortState<'name' | 'type' | 'status' | 'date' | 'location' | 'budget'>('date')
   const { sortKey: oppKey, sortDir: oppDir, toggle: oppToggle } = useSortState<'name' | 'organizer' | 'date' | 'location' | 'fit'>('date')
 
+  const highFitPipeline = opportunities.filter(o => o.strategic_fit === 'High' && o.status === 'pipeline')
+
   const underReview = [...opportunities.filter(o => o.status === 'pending_approval')].sort((a, b) => {
     let cmp = 0
     if (oppKey === 'name') cmp = a.name.localeCompare(b.name)
@@ -401,6 +403,40 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex items-center gap-1.5 text-sm font-medium text-amber-600 group-hover:text-amber-700">
+              Review all
+              <svg className="w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
+              </svg>
+            </div>
+          </div>
+        </Link>
+      )}
+
+      {/* High-Fit Pipeline Opportunities */}
+      {highFitPipeline.length > 0 && (
+        <Link
+          href="/opportunities?tab=opportunities"
+          className="group block bg-white rounded-xl border border-violet-200 hover:border-violet-400 shadow-sm mt-4 px-6 py-4 transition-colors"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <svg className="w-4 h-4 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3l14 9-14 9V3z"/>
+                </svg>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-gray-900">High-Fit Opportunities</span>
+                  <span className="text-xs bg-violet-500 text-white font-bold px-1.5 py-0.5 rounded-full">{highFitPipeline.length}</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {highFitPipeline.slice(0, 3).map(o => o.name).join(' · ')}
+                  {highFitPipeline.length > 3 ? ` · +${highFitPipeline.length - 3} more` : ''}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 text-sm font-medium text-violet-600 group-hover:text-violet-700">
               Review all
               <svg className="w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>

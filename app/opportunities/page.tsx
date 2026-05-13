@@ -33,6 +33,7 @@ interface Opportunity {
   status?: string
   added_to_events?: number
   generated_at?: string | null
+  created_at?: string
   is_competitor_event?: number
   competitor_name?: string | null
   review_notes?: string | null
@@ -205,6 +206,12 @@ export default function OpportunitiesPage() {
   const [visibleFilters, setVisibleFilters] = useState<string[]>(['fit', 'focus', 'region', 'date', 'sort'])
   const [userFocusAreas, setUserFocusAreas] = useState<string[]>([])
   const [userRegions, setUserRegions] = useState<string[]>([])
+
+  // Stale-warning state (M1 + M2)
+  const [today, setToday] = useState('')
+  const [dismissedStaleBanner, setDismissedStaleBanner] = useState(false)
+
+  useEffect(() => { setToday(new Date().toISOString().split('T')[0]) }, [])
 
   const loadScanStatus = () =>
     fetch('/api/opportunities/auto-scan')
@@ -639,6 +646,12 @@ export default function OpportunitiesPage() {
       // priority (default)
       return (b.priority_score || 0) - (a.priority_score || 0)
     })
+
+  // M2: stale pipeline detection
+  const latestCreatedAt = opportunities.length > 0
+    ? Math.max(...opportunities.map(o => new Date(o.created_at || 0).getTime()))
+    : 0
+  const pipelineIsStale = latestCreatedAt < Date.now() - 30 * 24 * 60 * 60 * 1000
 
   const highCount = pipelineOpps.filter(o => o.strategic_fit === 'High').length
   const sponsorCount = pipelineOpps.filter(o => o.recommendation === 'Sponsor').length
@@ -1175,6 +1188,34 @@ export default function OpportunitiesPage() {
       </div>
 
 
+      {/* M2: Stale pipeline banner */}
+      {pipelineIsStale && !dismissedStaleBanner && (pageTab === 'opportunities' || pageTab === 'all') && (
+        <div className="mb-5 bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 flex items-start gap-4">
+          <span className="text-xl flex-shrink-0 mt-0.5">🔄</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-blue-800">Your pipeline hasn&apos;t been refreshed in 30+ days</p>
+            <p className="text-xs text-blue-700 mt-0.5">Scan for new opportunities to keep your pipeline current.</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => setShowGenerateConfirm(true)}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+            >
+              Scan Now →
+            </button>
+            <button
+              onClick={() => setDismissedStaleBanner(true)}
+              className="text-blue-400 hover:text-blue-600 transition-colors"
+              aria-label="Dismiss"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Stats bar */}
       {opportunities.length > 0 && pageTab === 'opportunities' && (
         <div className="grid grid-cols-4 gap-3 mb-6">
@@ -1428,6 +1469,17 @@ export default function OpportunitiesPage() {
                     <div className="flex items-start gap-3 flex-wrap mb-2">
                       <h3 className="text-base font-bold text-gray-900">{opp.name}</h3>
                       <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${FIT_COLORS[opp.strategic_fit] || FIT_COLORS.Medium}`}>{opp.strategic_fit} fit</span>
+                      {today && opp.start_date && opp.start_date < today && (
+                        <>
+                          <span className="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full">Event date passed</span>
+                          <button
+                            onClick={() => moveToDoNotAttend(opp)}
+                            className="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors"
+                          >
+                            Archive
+                          </button>
+                        </>
+                      )}
                       {opp.relevant_for === 'ignitetech' && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200 font-medium">IgniteTech</span>}
                       {opp.relevant_for === 'khoros' && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-medium">Khoros</span>}
                       {opp.relevant_for === 'both' && <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200 font-medium">Both</span>}
@@ -2013,6 +2065,17 @@ export default function OpportunitiesPage() {
                           <h3 className="font-semibold text-gray-900 text-base leading-tight">{opp.name}</h3>
                           {isNew(opp) && (
                             <span className="rounded-full px-2 py-0.5 text-xs font-semibold bg-blue-500 text-white border border-blue-500">New</span>
+                          )}
+                          {today && opp.start_date && opp.start_date < today && (
+                            <>
+                              <span className="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full">Event date passed</span>
+                              <button
+                                onClick={() => moveToDoNotAttend(opp)}
+                                className="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors"
+                              >
+                                Archive
+                              </button>
+                            </>
                           )}
                           <span className={`rounded-full px-2 py-0.5 text-xs font-medium border ${FIT_COLORS[opp.strategic_fit] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                             {opp.strategic_fit} Fit

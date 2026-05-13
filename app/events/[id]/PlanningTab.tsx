@@ -344,6 +344,8 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
 
+  const [eventStartDate, setEventStartDate] = useState<string | null>(null)
+
   // Undo toast state
   const [undoTask, setUndoTask] = useState<PlanningItem | null>(null)
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -357,6 +359,10 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
   useEffect(() => {
     fetchItems()
     fetch('/api/team-members').then(r => r.json()).then(setTeamMembers).catch(() => {})
+    fetch(`/api/events/${eventId}`)
+      .then(r => r.json())
+      .then(data => setEventStartDate(data.start_date || null))
+      .catch(() => {})
   }, [eventId])
 
   const addItem = async (e: React.FormEvent) => {
@@ -401,6 +407,8 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
   const pct = items.length > 0 ? Math.round((done.length / items.length) * 100) : 0
   const overdueCount = todo.filter(i => i.due_date && daysUntil(i.due_date) < 0).length
   const dueSoonCount = todo.filter(i => i.due_date && daysUntil(i.due_date) >= 0 && daysUntil(i.due_date) <= 7).length
+  const daysUntilEvent = eventStartDate ? daysUntil(eventStartDate) : null
+  const openTaskCount = items.filter(i => i.status !== 'complete' && !i.done).length
 
   const todoIds = todo.map(i => i.id)
   const allTodoSelected = todoIds.length > 0 && todoIds.every(id => selectedIds.has(id))
@@ -622,6 +630,20 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
           </svg>
           <p className="text-sm">No tasks yet. Add one above or use AI Setup.</p>
+        </div>
+      )}
+
+      {/* Pre-event countdown banner */}
+      {daysUntilEvent !== null && daysUntilEvent >= 0 && daysUntilEvent <= 14 && openTaskCount > 0 && (
+        <div className={`rounded-xl px-5 py-3 mb-4 flex items-center gap-3 ${daysUntilEvent <= 7 ? 'bg-red-50 border border-red-200 text-red-800' : 'bg-amber-50 border border-amber-200 text-amber-800'}`}>
+          <span className="text-lg leading-none">⚡</span>
+          <div>
+            <div className="text-sm font-semibold">
+              {daysUntilEvent === 0 ? 'Event is today' : daysUntilEvent === 1 ? 'Event is tomorrow' : `Event is in ${daysUntilEvent} days`}
+              {' '}— {openTaskCount} task{openTaskCount !== 1 ? 's' : ''} still open
+            </div>
+            <div className="text-xs mt-0.5 opacity-80">Review and complete tasks before the event date.</div>
+          </div>
         </div>
       )}
 

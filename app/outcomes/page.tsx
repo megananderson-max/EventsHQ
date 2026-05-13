@@ -440,6 +440,43 @@ export default function OutcomesPage() {
         )}
       </div>
 
+      {/* ROI by Event Type */}
+      {(() => {
+        const roiByType = Object.entries(
+          events
+            .filter(e => e.roi != null && e.data_source !== 'benchmark')
+            .reduce((acc, e) => {
+              const type = e.type || 'other'
+              if (!acc[type]) acc[type] = []
+              acc[type].push(e.roi as number)
+              return acc
+            }, {} as Record<string, number[]>)
+        ).map(([type, values]) => ({
+          type,
+          avgRoi: values.reduce((a, b) => a + b, 0) / values.length,
+          count: values.length,
+        })).sort((a, b) => b.avgRoi - a.avgRoi)
+
+        if (roiByType.length < 2) return null
+
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
+            <p className="text-sm font-semibold text-gray-700 mb-3">ROI by Event Type</p>
+            <div className="flex flex-wrap">
+              {roiByType.map(({ type, avgRoi, count }) => (
+                <span key={type} className="inline-flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 mr-3 mb-2">
+                  <span className="text-sm text-gray-700">{TYPE_LABELS[type] || type}:</span>
+                  <span className={`font-bold text-sm ${avgRoi >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                    {avgRoi >= 0 ? '+' : ''}{Math.round(avgRoi)}%
+                  </span>
+                  <span className="text-xs text-gray-400">· {count} event{count !== 1 ? 's' : ''}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Filters */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <select

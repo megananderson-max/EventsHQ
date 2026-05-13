@@ -46,11 +46,27 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
   const [previousStatus, setPreviousStatus] = useState<string | null>(null)
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Change 1 — status-transition banner state
+  const [today, setToday] = useState('')
+  const [statusBannerDismissed, setStatusBannerDismissed] = useState(false)
+  const [markingComplete, setMarkingComplete] = useState(false)
+
+  // Change 2 — outcomes nudge state
+  const [hasOutcomes, setHasOutcomes] = useState(false)
+  const [outcomeNudgeDismissed, setOutcomeNudgeDismissed] = useState(false)
+
+  useEffect(() => {
+    setToday(new Date().toISOString().split('T')[0])
+  }, [])
+
   useEffect(() => {
     fetch(`/api/events/${event.id}/budget`).then(r => r.json()).then(setBudgetItems).catch(() => {})
     fetch(`/api/events/${event.id}/vendors`).then(r => r.json()).then((data: unknown[]) => setVendorCount(data.length)).catch(() => {})
     fetch(`/api/events/${event.id}/planning`).then(r => r.json()).then((data: Array<{done: number}>) => {
       setTaskStats({ done: data.filter(t => t.done).length, total: data.length })
+    }).catch(() => {})
+    fetch(`/api/events/${event.id}/outcomes`).then(r => r.json()).then((data: { attendees_actual?: number | null; pipeline_generated?: number | null; revenue_attributed?: number | null; satisfaction_score?: number | null }) => {
+      setHasOutcomes(!!(data && (data.attendees_actual || data.pipeline_generated || data.revenue_attributed || data.satisfaction_score)))
     }).catch(() => {})
   }, [event.id])
 
@@ -227,8 +243,84 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
     )
   }
 
+  // Derived flags for the two banners
+  const eventEnded = !!(today && event.end_date && event.end_date < today)
+  const showStatusBanner = eventEnded && !statusBannerDismissed && (event.status === 'planning' || event.status === 'active')
+  const showOutcomeNudge = eventEnded && !showStatusBanner && !outcomeNudgeDismissed && !hasOutcomes
+
   return (
     <div className="space-y-6">
+      {/* Change 1 — Auto-suggest status transition when event has ended */}
+      {showStatusBanner && (
+        <div className="flex items-center gap-4 bg-yellow-50 border border-yellow-300 rounded-xl px-5 py-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-yellow-900">
+              This event ended on {formatDate(event.end_date)} — ready to mark it as complete?
+            </p>
+          </div>
+          <button
+            onClick={async () => {
+              setMarkingComplete(true)
+              try {
+                const res = await fetch(`/api/events/${event.id}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ status: 'complete' }),
+                })
+                if (!res.ok) throw new Error('Failed')
+                onUpdate()
+              } catch {
+                // silently ignore — status remains unchanged
+              } finally {
+                setMarkingComplete(false)
+              }
+            }}
+            disabled={markingComplete}
+            className="flex-shrink-0 bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2"
+          >
+            {markingComplete && (
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+              </svg>
+            )}
+            Mark Complete
+          </button>
+          <button
+            onClick={() => setStatusBannerDismissed(true)}
+            className="flex-shrink-0 text-sm text-gray-500 hover:text-gray-700 font-medium"
+          >
+            Not yet
+          </button>
+        </div>
+      )}
+
+      {/* Change 2 — Post-event Outcomes nudge */}
+      {showOutcomeNudge && (
+        <div className="flex items-center gap-4 bg-slate-50 border border-slate-200 rounded-xl px-5 py-4">
+          <div className="flex-shrink-0 text-slate-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-slate-700">Post-event: Log your outcomes to measure ROI</p>
+          </div>
+          <a href="?tab=outcomes" className="flex-shrink-0 text-sm font-medium text-slate-600 hover:text-slate-900">
+            Go to Outcomes →
+          </a>
+          <button
+            onClick={() => setOutcomeNudgeDismissed(true)}
+            className="flex-shrink-0 text-slate-400 hover:text-slate-600"
+            aria-label="Dismiss"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Review Notes — prominent card shown when notes exist */}
       {event.review_notes && (
         <div className="flex items-start gap-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
