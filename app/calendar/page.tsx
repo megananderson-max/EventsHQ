@@ -70,7 +70,8 @@ export default function CalendarPage() {
     fetch('/api/events').then(r => r.json()).then(setEvents)
     fetch('/api/opportunities')
       .then(r => r.json())
-      .then((opps: Opportunity[]) => {
+      .then((data: { opportunities?: Opportunity[] } | Opportunity[]) => {
+        const opps = Array.isArray(data) ? data : (data.opportunities ?? [])
         setUnderReviewOpps(
           opps.filter(o => o.status === 'pending_approval' && o.start_date != null)
         )
