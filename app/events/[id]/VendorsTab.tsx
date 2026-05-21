@@ -3,6 +3,14 @@
 import { useState, useEffect } from 'react'
 import { SortTh, useSortState } from '@/app/components/SortTh'
 
+interface VendorSuggestion {
+  id: number
+  name: string
+  category: string
+  times_used: number
+  last_used_event: string | null
+}
+
 interface EventVendor {
   id: number
   event_id: number
@@ -60,6 +68,7 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
   const [vendorSearch, setVendorSearch] = useState('')
   const [showNewVendorForm, setShowNewVendorForm] = useState(false)
   const [newVendorForm, setNewVendorForm] = useState({ name: '', category: 'sponsorship', contact_name: '', contact_email: '', contact_phone: '' })
+  const [vendorSuggestions, setVendorSuggestions] = useState<VendorSuggestion[]>([])
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
   const { sortKey, sortDir, toggle } = useSortState<'name' | 'category'>('name')
 
@@ -72,6 +81,10 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
   useEffect(() => {
     fetchVendors()
     fetch('/api/vendors').then(r => r.json()).then(setAllVendors)
+    fetch(`/api/events/${eventId}/vendor-suggestions`)
+      .then(r => r.json())
+      .then(setVendorSuggestions)
+      .catch(() => {})
   }, [eventId])
 
   const openAdd = () => {
@@ -131,6 +144,16 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
     fetchVendors()
   }
 
+  const attachSuggestedVendor = async (vendorId: number) => {
+    await fetch(`/api/events/${eventId}/vendors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vendor_id: vendorId, contract_value: null, notes: null }),
+    })
+    setVendorSuggestions(prev => prev.filter(s => s.id !== vendorId))
+    fetchVendors()
+  }
+
   const createAndAddVendor = async () => {
     if (!newVendorForm.name || !newVendorForm.category) return
     setSaving(true)
@@ -154,6 +177,33 @@ export default function VendorsTab({ eventId }: { eventId: string }) {
 
   return (
     <div className="space-y-6">
+      {/* Vendor suggestions from past events */}
+      {vendorSuggestions.length > 0 && (
+        <div className="mb-5 bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">Used at similar events</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {vendorSuggestions.map(v => (
+              <button
+                key={v.id}
+                onClick={() => attachSuggestedVendor(v.id)}
+                className="flex items-center gap-1.5 bg-white border border-indigo-200 text-indigo-700 text-xs px-3 py-1.5 rounded-full hover:bg-indigo-100 transition-colors"
+              >
+                <span className="font-medium">{v.name}</span>
+                <span className="text-indigo-400">· {v.times_used}×</span>
+                <svg className="w-3 h-3 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                </svg>
+              </button>
+            ))}
+          </div>
+          {vendorSuggestions[0]?.last_used_event && (
+            <p className="text-[10px] text-indigo-400 mt-2">Based on vendors used at similar events</p>
+          )}
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">

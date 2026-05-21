@@ -22,13 +22,27 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     notes: body.notes ?? existing.notes ?? null,
     data_source: body.data_source ?? existing.data_source ?? 'manual',
   }
+  // Compute cost_per_lead and roi from actual spend
+  const spendRow = db.prepare('SELECT COALESCE(SUM(actual_amount), 0) as total FROM budget_items WHERE event_id = ?').get(Number(params.id)) as { total: number }
+  const totalActualSpend = spendRow.total
+
+  const costPerLead = (merged.leads_captured != null && (merged.leads_captured as number) > 0 && totalActualSpend > 0)
+    ? totalActualSpend / (merged.leads_captured as number)
+    : null
+
+  const roi = (merged.revenue_attributed != null && totalActualSpend > 0)
+    ? ((merged.revenue_attributed as number) - totalActualSpend) / totalActualSpend * 100
+    : null
+
   db.prepare(`
     INSERT OR REPLACE INTO event_outcomes
     (event_id, leads_captured, meetings_booked, pipeline_generated, revenue_attributed,
-     sponsorship_revenue, attendees_actual, satisfaction_score, notes, data_source, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+     sponsorship_revenue, attendees_actual, satisfaction_score, notes, data_source,
+     cost_per_lead, roi, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   `).run(Number(params.id), merged.leads_captured, merged.meetings_booked, merged.pipeline_generated,
     merged.revenue_attributed, merged.sponsorship_revenue, merged.attendees_actual,
-    merged.satisfaction_score, merged.notes, merged.data_source)
+    merged.satisfaction_score, merged.notes, merged.data_source,
+    costPerLead, roi)
   return NextResponse.json(db.prepare('SELECT * FROM event_outcomes WHERE event_id = ?').get(Number(params.id)))
 }

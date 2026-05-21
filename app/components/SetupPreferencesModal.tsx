@@ -42,7 +42,7 @@ interface Props {
 
 export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = 'Close', isFirstTime = false }: Props) {
   const router = useRouter()
-  const [mode, setMode]                               = useState<'ai' | 'manual' | 'saved'>('ai')
+  const [mode, setMode]                               = useState<'ai' | 'manual' | 'saved' | 'vendor_review'>('ai')
   const [aiDescription, setAiDescription]             = useState('')
   const [aiLoading, setAiLoading]                     = useState(false)
   const [aiError, setAiError]                         = useState<string | null>(null)
@@ -68,13 +68,21 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
   const [newCompanyEnriching, setNewCompanyEnriching] = useState(false)
   const [newCompanyError, setNewCompanyError]         = useState('')
 
-  // URL auto-populate step
-  const [enrichStep, setEnrichStep]                   = useState<'url_input' | 'form'>('url_input')
+  // URL auto-populate step — only show url_input for first-time onboarding
+  const [enrichStep, setEnrichStep]                   = useState<'url_input' | 'form'>(isFirstTime ? 'url_input' : 'form')
   const [websiteInput, setWebsiteInput]               = useState('')
   const [linkedinInput, setLinkedinInput]             = useState('')
   const [enrichLoading, setEnrichLoading]             = useState(false)
   const [enrichError, setEnrichError]                 = useState<string | null>(null)
   const [enrichedFrom, setEnrichedFrom]               = useState<string | null>(null)
+
+  // Vendor seeding
+  type VendorSuggestion = { name: string; category: string; website: string | null; notes: string }
+  const [vendorSuggestions, setVendorSuggestions]     = useState<VendorSuggestion[]>([])
+  const [selectedVendors, setSelectedVendors]         = useState<Set<number>>(new Set())
+  const [vendorLoading, setVendorLoading]             = useState(false)
+  const [vendorAdding, setVendorAdding]               = useState(false)
+  const [vendorAddedCount, setVendorAddedCount]       = useState(0)
 
   useEffect(() => {
     fetch('/api/settings')
@@ -107,12 +115,12 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       .finally(() => setLoadingPrefs(false))
   }, [])
 
-  // If user has existing prefs (i.e. editing), skip the URL step
+  // During first-time onboarding, skip the URL step if prefs already exist
   useEffect(() => {
-    if (!loadingPrefs && hasExistingPrefs) {
+    if (isFirstTime && !loadingPrefs && hasExistingPrefs) {
       setEnrichStep('form')
     }
-  }, [loadingPrefs, hasExistingPrefs])
+  }, [isFirstTime, loadingPrefs, hasExistingPrefs])
 
   const runEnrich = async () => {
     if (!websiteInput.trim()) return
@@ -325,10 +333,59 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
 
     setSaving(false)
     if (isFirstTime) {
-      setMode('saved')
+      // Kick off vendor seeding in background, then show vendor review step
+      setMode('vendor_review')
+      setVendorLoading(true)
+      fetch('/api/vendors/seed-from-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          focus_areas: focusAreas,
+          regions,
+          company_name: companies[0]?.name || companyName.trim(),
+          customer_profile: customerProfile.trim(),
+        }),
+      })
+        .then(r => r.json())
+        .then((data: { success: boolean; vendors?: VendorSuggestion[] }) => {
+          if (data.success && Array.isArray(data.vendors)) {
+            setVendorSuggestions(data.vendors)
+            // Pre-select all by default
+            setSelectedVendors(new Set(data.vendors.map((_, i) => i)))
+          }
+        })
+        .catch(() => {})
+        .finally(() => setVendorLoading(false))
     } else {
       onSaved()
     }
+  }
+
+  const addSelectedVendors = async () => {
+    if (selectedVendors.size === 0) { setMode('saved'); return }
+    setVendorAdding(true)
+    const toAdd = vendorSuggestions.filter((_, i) => selectedVendors.has(i))
+    try {
+      await Promise.all(toAdd.map(v =>
+        fetch('/api/vendors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: v.name, category: v.category, website: v.website || undefined, notes: v.notes }),
+        })
+      ))
+      setVendorAddedCount(toAdd.length)
+    } catch {
+      // Non-fatal — proceed to success screen
+    }
+    setVendorAdding(false)
+    setMode('saved')
+  }
+
+  const CATEGORY_LABELS: Record<string, string> = {
+    venue: 'Venue', catering: 'Catering', av_tech: 'AV / Tech', staffing: 'Staffing',
+    marketing: 'Marketing', transport: 'Transport', photo_video: 'Photo / Video',
+    print_branding: 'Print & Branding', logistics: 'Logistics', production: 'Production',
+    technology: 'Technology', media: 'Media', other: 'Other',
   }
 
   const canSave = companies.length > 0 || companyName.trim().length > 0
@@ -403,8 +460,143 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
 
-        {/* ── SUCCESS STATE ──────────────────────────────────────── */}
-        {mode === 'saved' ? (
+        {/* ── VENDOR REVIEW STATE ────────────────────────────────── */}
+        {mode === 'vendor_review' ? (
+          <div className="p-6 space-y-4">
+            <div className="flex items-center gap-3 mb-1">
+              <div className="w-8 h-8 bg-teal-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <svg className="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-gray-900">Pre-populate your vendor list</h2>
+                <p className="text-xs text-gray-500">Vendors commonly used for events in your space — deselect any you don&apos;t need.</p>
+              </div>
+            </div>
+
+            {vendorLoading ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-10 text-sm text-gray-500">
+                <svg className="w-6 h-6 animate-spin text-teal-500" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                <span>Finding relevant vendors for your profile…</span>
+              </div>
+            ) : vendorSuggestions.length === 0 ? (
+              <div className="text-center py-8 text-sm text-gray-400">
+                <p>Couldn&apos;t generate suggestions right now.</p>
+                <button onClick={() => setMode('saved')} className="mt-3 text-violet-600 hover:underline text-sm">
+                  Continue to dashboard →
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Select / deselect all */}
+                <div className="flex items-center justify-between text-xs text-gray-500 border-b border-gray-100 pb-2">
+                  <span>{selectedVendors.size} of {vendorSuggestions.length} selected</span>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setSelectedVendors(new Set(vendorSuggestions.map((_, i) => i)))}
+                      className="text-violet-600 hover:underline"
+                    >Select all</button>
+                    <button
+                      onClick={() => setSelectedVendors(new Set())}
+                      className="text-gray-400 hover:text-gray-600 hover:underline"
+                    >Deselect all</button>
+                  </div>
+                </div>
+
+                {/* Grouped by category */}
+                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                  {Object.entries(
+                    vendorSuggestions.reduce<Record<string, { vendor: VendorSuggestion; idx: number }[]>>((acc, v, i) => {
+                      const cat = v.category || 'other'
+                      if (!acc[cat]) acc[cat] = []
+                      acc[cat].push({ vendor: v, idx: i })
+                      return acc
+                    }, {})
+                  ).sort(([a], [b]) => a.localeCompare(b)).map(([cat, items]) => (
+                    <div key={cat}>
+                      <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                        {CATEGORY_LABELS[cat] ?? cat}
+                      </div>
+                      <div className="space-y-1">
+                        {items.map(({ vendor: v, idx }) => (
+                          <label
+                            key={idx}
+                            className={`flex items-start gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                              selectedVendors.has(idx)
+                                ? 'bg-teal-50 border-teal-200'
+                                : 'bg-white border-gray-100 opacity-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedVendors.has(idx)}
+                              onChange={() => {
+                                setSelectedVendors(prev => {
+                                  const next = new Set(prev)
+                                  if (next.has(idx)) next.delete(idx)
+                                  else next.add(idx)
+                                  return next
+                                })
+                              }}
+                              className="mt-0.5 accent-teal-600 flex-shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-medium text-gray-900">{v.name}</span>
+                                {v.website && (
+                                  <span className="text-[10px] text-gray-400 truncate">
+                                    {v.website.replace(/^https?:\/\/(www\.)?/, '')}
+                                  </span>
+                                )}
+                              </div>
+                              {v.notes && (
+                                <p className="text-xs text-gray-500 mt-0.5 leading-snug">{v.notes}</p>
+                              )}
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={addSelectedVendors}
+                    disabled={vendorAdding}
+                    className="flex-1 flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors"
+                  >
+                    {vendorAdding ? (
+                      <>
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                        </svg>
+                        Adding vendors…
+                      </>
+                    ) : (
+                      <>Add {selectedVendors.size} vendor{selectedVendors.size !== 1 ? 's' : ''} to my list</>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setMode('saved')}
+                    className="px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Skip
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+        ) : (
+
+        /* ── SUCCESS STATE ──────────────────────────────────────── */
+        mode === 'saved' ? (
           <div className="p-8 flex flex-col items-center text-center">
             <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mb-4">
               <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -413,7 +605,11 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
             </div>
             <h2 className="text-lg font-bold text-gray-900 mb-2">Preferences saved!</h2>
             <p className="text-sm text-gray-500 mb-6 max-w-xs">
-              Claude now knows what events to look for. Head to Opportunities to run your first AI-powered search.
+              Claude now knows what events to look for.
+              {vendorAddedCount > 0 && (
+                <> <span className="text-green-600 font-medium">{vendorAddedCount} vendors</span> have been added to your rolodex.</>
+              )}
+              {' '}Head to Opportunities to run your first AI-powered search.
             </p>
             <button
               onClick={() => { onSaved(); router.push('/opportunities') }}
@@ -821,6 +1017,7 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
               </div>
             )}
           </>
+        )
         )}
       </div>
     </div>

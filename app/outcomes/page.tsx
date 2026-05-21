@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import Link from 'next/link'
 
 interface EventOutcome {
@@ -143,7 +143,7 @@ function PipelineChart({ events }: { events: EventOutcome[] }) {
     .slice(0, 8)
 
   if (top.length === 0) return (
-    <div className="text-center py-8 text-gray-400 text-sm">No pipeline data to visualise yet.</div>
+    <div className="text-center py-8 text-gray-400 text-sm">No pipeline data to visualize yet.</div>
   )
 
   const maxPipeline = Math.max(...top.map(e => e.pipeline_generated ?? 0))
@@ -212,6 +212,204 @@ function PipelineChart({ events }: { events: EventOutcome[] }) {
   )
 }
 
+// Inline-editable table cell
+function InlineEditCell({
+  value, eventId, field, isCurrency, isFloat, onSaved,
+}: {
+  value: number | null
+  eventId: number
+  field: string
+  isCurrency: boolean
+  isFloat: boolean
+  onSaved: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const display = value == null ? '—'
+    : isCurrency ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value)
+    : isFloat ? `${value}/10`
+    : value.toLocaleString()
+
+  const startEdit = () => {
+    setVal(value != null ? String(value) : '')
+    setEditing(true)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const commit = async () => {
+    if (!editing) return
+    setSaving(true)
+    const parsed = val.trim() === '' ? null : (isFloat ? parseFloat(val) : parseInt(val, 10))
+    await fetch(`/api/events/${eventId}/outcomes`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: parsed, data_source: 'manual' }),
+    })
+    setSaving(false)
+    setEditing(false)
+    onSaved()
+  }
+
+  if (saving) return <span className="text-gray-400 text-xs">saving…</span>
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        step={isFloat ? '0.1' : '1'}
+        min={0}
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+        onBlur={commit}
+        className="w-24 border border-blue-300 rounded px-1.5 py-0.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-400 bg-blue-50"
+        placeholder="—"
+      />
+    )
+  }
+
+  return (
+    <span
+      onClick={startEdit}
+      className="cursor-pointer group inline-flex items-center gap-1 hover:text-blue-600 transition-colors"
+      title="Click to edit"
+    >
+      {display}
+      <svg className="w-2.5 h-2.5 text-gray-300 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+      </svg>
+    </span>
+  )
+}
+
+// Per-row AI import modal
+function ImportActualsModal({ event, onClose, onSaved }: {
+  event: { id: number; name: string; type: string; end_date: string | null }
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [text, setText] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [preview, setPreview] = useState<Record<string, number | string | null> | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const FIELDS: { key: string; label: string; isFloat?: boolean }[] = [
+    { key: 'leads_captured',     label: 'Leads Captured' },
+    { key: 'meetings_booked',    label: 'Meetings Booked' },
+    { key: 'pipeline_generated', label: 'Pipeline Generated ($)' },
+    { key: 'revenue_attributed', label: 'Revenue Attributed ($)' },
+    { key: 'sponsorship_revenue',label: 'Sponsorship Revenue ($)' },
+    { key: 'attendees_actual',   label: 'Actual Attendees' },
+    { key: 'satisfaction_score', label: 'Satisfaction Score (0–10)', isFloat: true },
+    { key: 'notes',              label: 'Notes' },
+  ]
+
+  const extract = async () => {
+    if (!text.trim()) return
+    setLoading(true); setError(null); setPreview(null)
+    try {
+      const res = await fetch(`/api/events/${event.id}/debrief`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ responses: text, dry_run: true }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Extraction failed')
+      setPreview(data)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Extraction failed') }
+    finally { setLoading(false) }
+  }
+
+  const confirm = async () => {
+    if (!preview) return
+    setSaving(true)
+    await fetch(`/api/events/${event.id}/outcomes`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...preview, data_source: 'ai_import' }),
+    })
+    setSaving(false)
+    onSaved()
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h2 className="font-bold text-gray-900">Import Actuals with AI</h2>
+            <p className="text-xs text-gray-500 mt-0.5">{event.name}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {!preview ? (
+            <>
+              <p className="text-sm text-gray-500">Paste your post-event report, CRM data, debrief notes, or any text containing results — AI will extract the metrics for you to review.</p>
+              <textarea
+                value={text} onChange={e => setText(e.target.value)}
+                rows={6}
+                placeholder="e.g. We captured 47 leads, booked 12 follow-up meetings, pipeline of $380k. Overall satisfaction was 8.5/10. Revenue attributed so far is $95k…"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-y"
+              />
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              <button onClick={extract} disabled={loading || !text.trim()}
+                className="w-full flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold">
+                {loading ? (
+                  <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>Extracting…</>
+                ) : (
+                  <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>Extract Actuals</>
+                )}
+              </button>
+            </>
+          ) : (
+            <>
+              {preview.extraction_summary && (
+                <div className="bg-violet-50 border border-violet-200 rounded-lg px-4 py-3 text-xs text-violet-800">{String(preview.extraction_summary)}</div>
+              )}
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Review &amp; edit before saving</p>
+              <div className="grid grid-cols-2 gap-3">
+                {FIELDS.map(f => (
+                  <div key={f.key} className={f.key === 'notes' ? 'col-span-2' : ''}>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
+                    {f.key === 'notes' ? (
+                      <textarea rows={2} value={String(preview[f.key] ?? '')}
+                        onChange={e => setPreview(p => p ? { ...p, [f.key]: e.target.value } : p)}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"/>
+                    ) : (
+                      <input type="number" step={f.isFloat ? '0.1' : '1'} min={0}
+                        value={preview[f.key] != null ? String(preview[f.key]) : ''}
+                        onChange={e => setPreview(p => p ? { ...p, [f.key]: e.target.value === '' ? null : (f.isFloat ? parseFloat(e.target.value) : parseInt(e.target.value, 10)) } : p)}
+                        placeholder="—"
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"/>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button onClick={confirm} disabled={saving}
+                  className="flex-1 flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-sm font-semibold">
+                  {saving ? 'Saving…' : 'Confirm & Save Actuals'}
+                </button>
+                <button onClick={() => setPreview(null)} className="px-4 py-2.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50">← Back</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function OutcomesPage() {
   const [data, setData] = useState<{ events: EventOutcome[]; totals: Totals } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -223,6 +421,7 @@ export default function OutcomesPage() {
   const [filterSource, setFilterSource] = useState('')
   const [filterYear, setFilterYear] = useState('')
   const [showChart, setShowChart] = useState(true)
+  const [importTarget, setImportTarget] = useState<EventOutcome | null>(null)
 
   const loadData = () =>
     fetch('/api/outcomes')
@@ -557,14 +756,10 @@ export default function OutcomesPage() {
               ) : (
                 sorted.map(event => {
                   const isEstimate = event.data_source === 'benchmark'
-                  const hasData = event.data_source !== null
                   return (
                     <tr key={event.id} className={`hover:bg-gray-50 transition-colors ${isEstimate ? 'bg-amber-50/30' : ''}`}>
                       <td className="px-4 py-3">
-                        <Link
-                          href={`/events/${event.id}?tab=Outcomes`}
-                          className="font-medium text-gray-900 hover:text-blue-600 transition-colors"
-                        >
+                        <Link href={`/events/${event.id}?tab=Outcomes`} className="font-medium text-gray-900 hover:text-blue-600 transition-colors">
                           {event.name}
                         </Link>
                       </td>
@@ -573,54 +768,41 @@ export default function OutcomesPage() {
                       <td className="px-4 py-3 text-right font-medium text-gray-700 whitespace-nowrap">
                         {event.budget_total ? formatCurrencyFull(event.budget_total) : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        {hasData && event.leads_captured != null ? (
-                          <span className={`font-semibold ${isEstimate ? 'text-amber-700' : 'text-gray-800'}`}>
-                            {event.leads_captured.toLocaleString()}
-                          </span>
-                        ) : <span className="text-gray-300">—</span>}
+                      <td className={`px-4 py-3 text-right font-semibold ${isEstimate ? 'text-amber-700' : 'text-gray-800'}`}>
+                        <InlineEditCell value={event.leads_captured} eventId={event.id} field="leads_captured" isCurrency={false} isFloat={false} onSaved={loadData} />
                       </td>
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {hasData && event.pipeline_generated != null ? (
-                          <span className={`font-semibold ${isEstimate ? 'text-amber-700' : 'text-green-700'}`}>
-                            {formatCurrencyFull(event.pipeline_generated)}
-                          </span>
-                        ) : <span className="text-gray-300">—</span>}
+                      <td className={`px-4 py-3 text-right whitespace-nowrap font-semibold ${isEstimate ? 'text-amber-700' : 'text-green-700'}`}>
+                        <InlineEditCell value={event.pipeline_generated} eventId={event.id} field="pipeline_generated" isCurrency={true} isFloat={false} onSaved={loadData} />
                       </td>
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {hasData && event.revenue_attributed != null ? (
-                          <span className={`font-semibold ${isEstimate ? 'text-amber-700' : 'text-blue-700'}`}>
-                            {formatCurrencyFull(event.revenue_attributed)}
-                          </span>
-                        ) : <span className="text-gray-300">—</span>}
+                      <td className={`px-4 py-3 text-right whitespace-nowrap font-semibold ${isEstimate ? 'text-amber-700' : 'text-blue-700'}`}>
+                        <InlineEditCell value={event.revenue_attributed} eventId={event.id} field="revenue_attributed" isCurrency={true} isFloat={false} onSaved={loadData} />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <ROIBadge roi={event.roi} />
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        {hasData && event.satisfaction_score != null ? (
-                          <span className={`text-xs font-medium ${event.satisfaction_score >= 8 ? 'text-green-600' : event.satisfaction_score >= 6 ? 'text-yellow-600' : 'text-red-600'}`}>
-                            {event.satisfaction_score}/10
-                          </span>
-                        ) : <span className="text-gray-300 text-xs">—</span>}
+                      <td className={`px-4 py-3 text-right text-xs font-medium ${event.satisfaction_score != null ? (event.satisfaction_score >= 8 ? 'text-green-600' : event.satisfaction_score >= 6 ? 'text-yellow-600' : 'text-red-600') : ''}`}>
+                        <InlineEditCell value={event.satisfaction_score} eventId={event.id} field="satisfaction_score" isCurrency={false} isFloat={true} onSaved={loadData} />
                       </td>
                       <td className="px-4 py-3">
-                        {event.data_source ? (
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_LABELS[event.data_source]?.cls || 'bg-gray-100 text-gray-600'}`}>
-                            {SOURCE_LABELS[event.data_source]?.label || event.data_source}
-                          </span>
-                        ) : (
-                          event.concluded ? (
-                            <Link
-                              href={`/events/${event.id}?tab=Outcomes`}
-                              className="text-xs text-blue-500 hover:text-blue-700 font-medium"
-                            >
-                              Log outcomes →
-                            </Link>
-                          ) : (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {event.data_source ? (
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_LABELS[event.data_source]?.cls || 'bg-gray-100 text-gray-600'}`}>
+                              {SOURCE_LABELS[event.data_source]?.label || event.data_source}
+                            </span>
+                          ) : !event.concluded ? (
                             <span className="text-xs text-gray-300">Upcoming</span>
-                          )
-                        )}
+                          ) : null}
+                          {event.concluded && (
+                            <button
+                              onClick={() => setImportTarget(event)}
+                              className="text-xs text-violet-600 hover:text-violet-800 font-medium flex items-center gap-0.5 whitespace-nowrap"
+                              title="Import actuals with AI"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                              Import
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -637,8 +819,17 @@ export default function OutcomesPage() {
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
           </svg>
-          Rows highlighted in amber are AI benchmark estimates — click the event to update with actual figures.
+          Rows highlighted in amber are AI estimates — click any cell to edit, or use <strong>Import</strong> to paste actuals and let AI extract the numbers.
         </p>
+      )}
+
+      {/* AI Import modal */}
+      {importTarget && (
+        <ImportActualsModal
+          event={importTarget}
+          onClose={() => setImportTarget(null)}
+          onSaved={loadData}
+        />
       )}
     </div>
   )

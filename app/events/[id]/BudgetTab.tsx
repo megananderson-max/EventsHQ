@@ -51,8 +51,6 @@ interface Vendor {
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-700',
   approved: 'bg-blue-100 text-blue-700',
-  invoiced: 'bg-yellow-100 text-yellow-800',
-  paid: 'bg-green-100 text-green-800',
 }
 
 const CATEGORIES = ['sponsorship', 'branding', 'travel', 'accommodation', 'venue', 'catering', 'av_tech', 'staffing', 'marketing', 'transport', 'hotel', 'contingency', 'misc']
@@ -76,8 +74,6 @@ const CATEGORY_LABELS: Record<string, string> = {
 const BUDGET_STATUS_LABELS: Record<string, string> = {
   pending: 'Pending',
   approved: 'Approved',
-  invoiced: 'Invoiced',
-  paid: 'Paid',
 }
 
 
@@ -92,7 +88,7 @@ function extractGBP(notes: string | null): string | null {
   return m ? `£${m[1]}` : null
 }
 
-const EMPTY_FORM = { category: 'misc', description: '', vendor_id: '', planned_amount: '', actual_amount: '0', po_number: '', invoice_number: '', payment_due_date: '', status: 'pending', notes: '', is_estimate: '1' }
+const EMPTY_FORM = { category: 'misc', description: '', vendor_id: '', planned_amount: '', actual_amount: '0', status: 'pending', notes: '', is_estimate: '1' }
 
 const DEFAULT_CONTINGENCY = 5000
 
@@ -116,10 +112,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
   // Undo toast state
   const [undoItem, setUndoItem] = useState<BudgetItem | null>(null)
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Change 3: bulk mark-as-paid
-  const [markingPaid, setMarkingPaid] = useState(false)
-  const [markPaidSuccess, setMarkPaidSuccess] = useState(false)
 
   // Change 4: editable contingency
   const contingencySettingKey = `event_contingency_${eventId}`
@@ -190,9 +182,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
   const remaining = budgetTotal - totalActual
   const pctUsed = budgetTotal > 0 ? Math.min(Math.round((totalActual / budgetTotal) * 100), 100) : 0
 
-  // Change 3: invoiced items
-  const invoicedItems = items.filter(i => i.status === 'invoiced')
-
   const openAdd = () => {
     setEditingItem(null)
     setForm({ ...EMPTY_FORM })
@@ -207,9 +196,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
       vendor_id: item.vendor_id?.toString() || '',
       planned_amount: item.planned_amount?.toString() || '0',
       actual_amount: item.actual_amount?.toString() || '0',
-      po_number: item.po_number || '',
-      invoice_number: item.invoice_number || '',
-      payment_due_date: item.payment_due_date || '',
       status: item.status,
       notes: item.notes || '',
       is_estimate: item.is_estimate ? '1' : '0',
@@ -225,7 +211,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
       vendor_id: form.vendor_id ? parseInt(form.vendor_id) : null,
       planned_amount: parseFloat(form.planned_amount) || 0,
       actual_amount: parseFloat(form.actual_amount) || 0,
-      payment_due_date: form.payment_due_date || null,
       is_estimate: form.is_estimate === '1' ? 1 : 0,
     }
     if (editingItem) {
@@ -269,37 +254,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
       body: JSON.stringify(payload),
     })
     fetch_(false)
-  }
-
-  // Change 3: bulk mark-as-paid
-  const markAllInvoicedAsPaid = async () => {
-    if (invoicedItems.length === 0) return
-    setMarkingPaid(true)
-    setMarkPaidSuccess(false)
-    for (const item of invoicedItems) {
-      const payload = {
-        category: item.category,
-        description: item.description,
-        vendor_id: item.vendor_id,
-        planned_amount: item.planned_amount,
-        actual_amount: item.actual_amount,
-        po_number: item.po_number,
-        invoice_number: item.invoice_number,
-        payment_due_date: item.payment_due_date,
-        status: 'paid',
-        notes: item.notes,
-        is_estimate: item.is_estimate,
-      }
-      await fetch(`/api/events/${eventId}/budget/${item.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-    }
-    setMarkingPaid(false)
-    setMarkPaidSuccess(true)
-    fetch_(false)
-    setTimeout(() => setMarkPaidSuccess(false), 4000)
   }
 
   // Change 4: save contingency
@@ -359,8 +313,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
   }
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
-
-  const today = new Date().toISOString().split('T')[0]
 
   // Split into confirmed and estimated, then group each by category
   const confirmedItems = items.filter(i => !i.is_estimate)
@@ -490,36 +442,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
           </div>
         </div>
 
-        {/* Change 3: Mark all invoiced as paid */}
-        {invoicedItems.length > 0 && (
-          <div className="mt-3 flex items-center gap-3">
-            <button
-              onClick={markAllInvoicedAsPaid}
-              disabled={markingPaid}
-              className="flex items-center gap-1.5 bg-green-50 hover:bg-green-100 disabled:opacity-50 text-green-700 border border-green-200 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-            >
-              {markingPaid ? (
-                <>
-                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  Updating...
-                </>
-              ) : (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Mark all invoiced as Paid ({invoicedItems.length})
-                </>
-              )}
-            </button>
-            {markPaidSuccess && (
-              <span className="text-xs text-green-600 font-medium">All invoiced items marked as paid.</span>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Items by Category */}
@@ -637,9 +559,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
                                         {extractGBP(item.notes)} GBP
                                       </span>
                                     )}
-                                    {item.payment_due_date && item.payment_due_date < today && item.status !== 'paid' && (
-                                      <span className="ml-2 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">Payment overdue</span>
-                                    )}
                                   </span>
                                 </td>
                                 <td className="px-6 py-3 text-sm text-gray-500">{item.vendor_name || '—'}</td>
@@ -746,9 +665,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
                                         {extractGBP(item.notes)} GBP
                                       </span>
                                     )}
-                                    {item.payment_due_date && item.payment_due_date < today && item.status !== 'paid' && (
-                                      <span className="ml-2 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">Payment overdue</span>
-                                    )}
                                   </span>
                                 </td>
                                 <td className="px-6 py-3 text-sm text-gray-500">{item.vendor_name || '—'}</td>
@@ -834,8 +750,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
                   <select value={form.status} onChange={e => set('status', e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="pending">Pending</option>
                     <option value="approved">Approved</option>
-                    <option value="invoiced">Invoiced</option>
-                    <option value="paid">Paid</option>
                   </select>
                 </div>
               </div>
@@ -859,11 +773,6 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
                   <label className="block text-sm font-medium text-gray-700 mb-1">Actual Amount ($)</label>
                   <input type="number" value={form.actual_amount} onChange={e => set('actual_amount', e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Due Date</label>
-                <input type="date" value={form.payment_due_date} onChange={e => set('payment_due_date', e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <p className="text-xs text-gray-400 mt-1">Best practice: set to the quarter before the event (e.g., event in Q3 → pay in Q2)</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>

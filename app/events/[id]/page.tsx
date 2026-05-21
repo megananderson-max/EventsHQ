@@ -10,7 +10,7 @@ import PlanningTab from './PlanningTab'
 import OutcomesTab from './OutcomesTab'
 import { Event, EventStatusBadge, EVENT_TYPE_LABELS } from './types'
 
-const TABS = ['Overview', 'Planning', 'Vendors', 'Budget', 'Outcomes'] as const
+const TABS = ['Overview', 'Task List', 'Vendors', 'Budget', 'Outcomes'] as const
 type Tab = typeof TABS[number]
 
 interface AISetupResult {
@@ -76,7 +76,7 @@ export default function EventDetailPage() {
     const tabParam = searchParams.get('tab')
     if (tabParam) {
       const TAB_MAP: Record<string, string> = {
-        planning: 'Planning',
+        planning: 'Task List',
         vendors: 'Vendors',
         budget: 'Budget',
         outcomes: 'Outcomes',
@@ -358,7 +358,7 @@ export default function EventDetailPage() {
                   )}
                   <div className="flex gap-3 pt-1">
                     <button
-                      onClick={() => { setAiSetupOpen(false); setActiveTab('Planning') }}
+                      onClick={() => { setAiSetupOpen(false); setActiveTab('Task List') }}
                       className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
                     >
                       View Planning
@@ -382,7 +382,7 @@ export default function EventDetailPage() {
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-1">
           {TABS.map(tab => {
-            const count = tab === 'Planning' ? tabCounts?.planning : tab === 'Vendors' ? tabCounts?.vendors : tab === 'Budget' ? tabCounts?.budget : null
+            const count = tab === 'Task List' ? tabCounts?.planning : tab === 'Vendors' ? tabCounts?.vendors : tab === 'Budget' ? tabCounts?.budget : null
             return (
               <button
                 key={tab}
@@ -407,7 +407,7 @@ export default function EventDetailPage() {
 
       {/* Tab Content */}
       {activeTab === 'Overview' && <OverviewTab event={event} onUpdate={fetchEvent} onTabChange={setActiveTab} />}
-      {activeTab === 'Planning' && <PlanningTab eventId={id} />}
+      {activeTab === 'Task List' && <PlanningTab eventId={id} />}
       {activeTab === 'Vendors' && <VendorsTab eventId={id} />}
       {activeTab === 'Budget' && <BudgetTab eventId={id} budgetTotal={event.budget_total} />}
       {activeTab === 'Outcomes' && <OutcomesTab eventId={id} event={event} />}

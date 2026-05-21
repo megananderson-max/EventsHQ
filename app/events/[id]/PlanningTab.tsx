@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SortTh, useSortState } from '@/app/components/SortTh'
 
 // --------------- UndoToast ---------------
@@ -86,12 +86,13 @@ function StatusBadge({ status, onClick }: { status: TaskStatus | null; onClick?:
   )
 }
 
-interface TeamMember { id: number; name: string }
+interface TeamMember { id: number; name: string; job_function?: string | null }
 
 interface TaskRowProps {
   item: PlanningItem
   eventId: string
   teamMembers: TeamMember[]
+  memberTaskCounts: Record<string, number>
   onRefresh: () => void
   onDeleted: (item: PlanningItem) => void
   selected: boolean
@@ -100,7 +101,7 @@ interface TaskRowProps {
 
 type EditField = 'title' | 'description' | 'due_date' | null
 
-function TaskRow({ item, eventId, teamMembers, onRefresh, onDeleted, selected, onSelectChange }: TaskRowProps) {
+function TaskRow({ item, eventId, teamMembers, memberTaskCounts, onRefresh, onDeleted, selected, onSelectChange }: TaskRowProps) {
   const [editingField, setEditingField] = useState<EditField>(null)
   const [editTitle, setEditTitle] = useState(item.title)
   const [editDesc, setEditDesc] = useState(item.description || '')
@@ -260,7 +261,9 @@ function TaskRow({ item, eventId, teamMembers, onRefresh, onDeleted, selected, o
         >
           <option value="">Unassigned</option>
           {teamMembers.map(m => (
-            <option key={m.id} value={m.name}>{m.name}</option>
+            <option key={m.id} value={m.name}>
+              {m.name}{memberTaskCounts[m.name] ? ` (${memberTaskCounts[m.name]} tasks)` : ''}
+            </option>
           ))}
         </select>
       </td>
@@ -343,12 +346,34 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
   const [showDone, setShowDone] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [assigneeSuggested, setAssigneeSuggested] = useState(false)
 
   const [eventStartDate, setEventStartDate] = useState<string | null>(null)
 
   // Undo toast state
   const [undoTask, setUndoTask] = useState<PlanningItem | null>(null)
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const FUNCTION_KEYWORDS: Record<string, string[]> = {
+    marketing:   ['brand', 'branding', 'marketing', 'social media', 'email blast', 'newsletter', 'press release', 'announcement', 'pr', 'campaign', 'promotion', 'promotional'],
+    creative:    ['design', 'artwork', 'logo', 'graphic', 'illustration', 'collateral', 'banner', 'signage', 'backdrop', 'print', 'creative', 'visual', 'photography', 'photo'],
+    operations:  ['staff', 'staffing', 'volunteer', 'venue', 'setup', 'breakdown', 'registration', 'badge', 'check-in', 'checkin', 'on-site', 'onsite', 'coordinate', 'logistics', 'host'],
+    finance:     ['invoice', 'payment', 'pay', 'budget', 'cost', 'expense', 'deposit', 'purchase order', 'po', 'contract', 'quote', 'billing', 'reimburse'],
+    technology:  ['av', 'audio', 'video', 'tech', 'livestream', 'live stream', 'wifi', 'wi-fi', 'screen', 'projector', 'microphone', 'mic', 'recording', 'it support', 'streaming', 'internet'],
+    admin:       ['book', 'booking', 'travel', 'hotel', 'flight', 'accommodation', 'calendar', 'invite', 'permit', 'insurance', 'confirm', 'schedule', 'document', 'report', 'brief'],
+    executive:   ['approve', 'sign off', 'signoff', 'keynote', 'speech', 'strategy', 'negotiate', 'sponsor', 'review and approve'],
+  }
+
+  const suggestAssignee = (title: string): string => {
+    const lower = title.toLowerCase()
+    for (const [fn, keywords] of Object.entries(FUNCTION_KEYWORDS)) {
+      if (keywords.some(kw => lower.includes(kw))) {
+        const match = teamMembers.find(m => m.job_function === fn)
+        if (match) return match.name
+      }
+    }
+    return ''
+  }
 
   const fetchItems = () => {
     fetch(`/api/events/${eventId}/planning`)
@@ -384,6 +409,7 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
     setNewTitle('')
     setNewDesc('')
     setNewAssignee('')
+    setAssigneeSuggested(false)
     setNewDueDate('')
     setShowAddDetails(false)
     setAdding(false)
@@ -401,6 +427,17 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
       return sortDir === 'asc' ? cmp : -cmp
     })
   }
+
+  // M2 — count open tasks per assignee
+  const memberTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    items.forEach(i => {
+      if (i.assigned_to && !i.done && i.status !== 'complete') {
+        counts[i.assigned_to] = (counts[i.assigned_to] || 0) + 1
+      }
+    })
+    return counts
+  }, [items])
 
   const todo = sortList(items.filter(i => !i.done))
   const done = sortList(items.filter(i => i.done))
@@ -492,7 +529,15 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
     downloadCSV([header, ...rows], 'planning-tasks.csv')
   }
 
-  if (loading) return <div className="text-gray-400 py-8">Loading...</div>
+  if (loading) return (
+    <div className="flex items-center justify-center py-16 text-gray-400 text-sm gap-2">
+      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+      Loading tasks…
+    </div>
+  )
 
   const TableHeader = ({ forDone = false }: { forDone?: boolean }) => (
     <thead>
@@ -564,7 +609,17 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
             <input
               type="text"
               value={newTitle}
-              onChange={e => setNewTitle(e.target.value)}
+              onChange={e => {
+                const val = e.target.value
+                setNewTitle(val)
+                if (!newAssignee) {
+                  const suggested = suggestAssignee(val)
+                  if (suggested) {
+                    setNewAssignee(suggested)
+                    setAssigneeSuggested(true)
+                  }
+                }
+              }}
               placeholder="Add a task..."
               className="px-4 py-2.5 text-sm focus:outline-none focus:bg-blue-50/40 border-0"
             />
@@ -604,15 +659,25 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
         {showAddDetails && (
           <div className="grid grid-cols-2 gap-3 px-4 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Assign to</label>
+              <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1.5">
+                Assign to
+                {assigneeSuggested && (
+                  <span className="text-[10px] text-teal-500 font-medium">✦ auto</span>
+                )}
+              </label>
               <select
                 value={newAssignee}
-                onChange={e => setNewAssignee(e.target.value)}
+                onChange={e => {
+                  setNewAssignee(e.target.value)
+                  setAssigneeSuggested(false)
+                }}
                 className="w-full px-2.5 py-1.5 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
               >
                 <option value="">Unassigned</option>
                 {teamMembers.map(m => (
-                  <option key={m.id} value={m.name}>{m.name}</option>
+                  <option key={m.id} value={m.name}>
+                    {m.name}{memberTaskCounts[m.name] ? ` (${memberTaskCounts[m.name]} tasks)` : ''}
+                  </option>
                 ))}
               </select>
             </div>
@@ -635,7 +700,7 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
           <svg className="w-10 h-10 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
           </svg>
-          <p className="text-sm">No tasks yet. Add one above or use AI Setup.</p>
+          <p className="text-sm">No tasks yet. Add one above, or use <strong>Import &amp; Update with AI</strong> to generate a task list automatically.</p>
         </div>
       )}
 
@@ -677,6 +742,7 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
                       item={item}
                       eventId={eventId}
                       teamMembers={teamMembers}
+                      memberTaskCounts={memberTaskCounts}
                       onRefresh={fetchItems}
                       onDeleted={handleTaskDeleted}
                       selected={selectedIds.has(item.id)}
@@ -723,6 +789,7 @@ export default function PlanningTab({ eventId }: { eventId: string }) {
                     item={item}
                     eventId={eventId}
                     teamMembers={teamMembers}
+                    memberTaskCounts={memberTaskCounts}
                     onRefresh={fetchItems}
                     onDeleted={handleTaskDeleted}
                     selected={selectedIds.has(item.id)}

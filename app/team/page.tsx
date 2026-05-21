@@ -11,9 +11,31 @@ interface TeamMember {
   email: string | null
   is_me: number
   role?: string | null
+  job_function?: string | null
 }
 
-function RoleBadge({ role }: { role?: string | null }) {
+const ACCESS_OPTIONS = [
+  { value: 'owner',   label: 'Owner' },
+  { value: 'admin',   label: 'Admin' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'user',    label: 'User' },
+]
+
+const FUNCTION_OPTIONS = [
+  { value: 'marketing',   label: 'Marketing' },
+  { value: 'creative',    label: 'Creative & Design' },
+  { value: 'operations',  label: 'Operations' },
+  { value: 'finance',     label: 'Finance' },
+  { value: 'technology',  label: 'Technology & AV' },
+  { value: 'admin',       label: 'Admin & Coordination' },
+  { value: 'executive',   label: 'Executive' },
+  { value: 'other',       label: 'Other' },
+]
+
+function AccessBadge({ role }: { role?: string | null }) {
+  if (role === 'owner') {
+    return <span className="text-xs bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5 font-medium">Owner</span>
+  }
   if (role === 'admin') {
     return <span className="text-xs bg-blue-100 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5 font-medium">Admin</span>
   }
@@ -23,11 +45,30 @@ function RoleBadge({ role }: { role?: string | null }) {
   return <span className="text-xs text-gray-400">User</span>
 }
 
-const ROLE_OPTIONS = [
-  { value: 'user', label: 'User' },
-  { value: 'manager', label: 'Manager' },
-  { value: 'admin', label: 'Admin' },
-]
+function FunctionBadge({ fn }: { fn?: string | null }) {
+  if (fn === 'marketing') {
+    return <span className="text-xs bg-pink-100 text-pink-700 rounded-full px-2 py-0.5 font-medium">Marketing</span>
+  }
+  if (fn === 'creative') {
+    return <span className="text-xs bg-purple-100 text-purple-700 rounded-full px-2 py-0.5 font-medium">Creative & Design</span>
+  }
+  if (fn === 'operations') {
+    return <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5 font-medium">Operations</span>
+  }
+  if (fn === 'finance') {
+    return <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5 font-medium">Finance</span>
+  }
+  if (fn === 'technology') {
+    return <span className="text-xs bg-sky-100 text-sky-700 rounded-full px-2 py-0.5 font-medium">Technology & AV</span>
+  }
+  if (fn === 'admin') {
+    return <span className="text-xs bg-slate-100 text-slate-600 rounded-full px-2 py-0.5 font-medium">Admin & Coordination</span>
+  }
+  if (fn === 'executive') {
+    return <span className="text-xs bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 font-medium">Executive</span>
+  }
+  return <></>
+}
 
 export default function TeamPage() {
   const [members, setMembers] = useState<TeamMember[]>([])
@@ -37,7 +78,8 @@ export default function TeamPage() {
   const [addFirstName, setAddFirstName] = useState('')
   const [addLastName, setAddLastName] = useState('')
   const [addEmail, setAddEmail] = useState('')
-  const [addRole, setAddRole] = useState('user')
+  const [addAccess, setAddAccess] = useState('user')
+  const [addFunction, setAddFunction] = useState('other')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
 
@@ -46,7 +88,8 @@ export default function TeamPage() {
   const [editFirstName, setEditFirstName] = useState('')
   const [editLastName, setEditLastName] = useState('')
   const [editEmail, setEditEmail] = useState('')
-  const [editRole, setEditRole] = useState('user')
+  const [editAccess, setEditAccess] = useState('user')
+  const [editFunction, setEditFunction] = useState('other')
   const [saving, setSaving] = useState(false)
 
   // Remove confirm modal state
@@ -89,7 +132,8 @@ export default function TeamPage() {
     setEditFirstName(m.first_name || m.name)
     setEditLastName(m.last_name || '')
     setEditEmail(m.email || '')
-    setEditRole(m.role || 'user')
+    setEditAccess(m.role || 'user')
+    setEditFunction(m.job_function || 'other')
   }
 
   const cancelEdit = () => {
@@ -97,7 +141,8 @@ export default function TeamPage() {
     setEditFirstName('')
     setEditLastName('')
     setEditEmail('')
-    setEditRole('user')
+    setEditAccess('user')
+    setEditFunction('other')
   }
 
   const saveEdit = async (m: TeamMember) => {
@@ -106,7 +151,7 @@ export default function TeamPage() {
     await fetch(`/api/team-members/${m.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ first_name: editFirstName, last_name: editLastName || null, email: editEmail || null, is_me: m.is_me, role: editRole }),
+      body: JSON.stringify({ first_name: editFirstName, last_name: editLastName || null, email: editEmail || null, is_me: m.is_me, role: editAccess, job_function: editFunction }),
     })
     await load()
     setEditingId(null)
@@ -117,7 +162,7 @@ export default function TeamPage() {
     await fetch(`/api/team-members/${m.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ first_name: m.first_name || m.name, last_name: m.last_name, email: m.email, is_me: 1, role: m.role || 'user' }),
+      body: JSON.stringify({ first_name: m.first_name || m.name, last_name: m.last_name, email: m.email, is_me: 1, role: m.role || 'user', job_function: m.job_function || null }),
     })
     await load()
   }
@@ -199,13 +244,14 @@ export default function TeamPage() {
     const res = await fetch('/api/team-members', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ first_name: addFirstName.trim(), last_name: addLastName.trim() || null, email: addEmail.trim() || null, is_me: 0, role: addRole }),
+      body: JSON.stringify({ first_name: addFirstName.trim(), last_name: addLastName.trim() || null, email: addEmail.trim() || null, is_me: 0, role: addAccess, job_function: addFunction }),
     })
     if (res.ok) {
       setAddFirstName('')
       setAddLastName('')
       setAddEmail('')
-      setAddRole('user')
+      setAddAccess('user')
+      setAddFunction('other')
       await load()
     } else {
       const d = await res.json()
@@ -235,7 +281,7 @@ export default function TeamPage() {
         </div>
         <div>
           <h1 className="text-xl font-bold text-gray-900">Team Members</h1>
-          <p className="text-sm text-gray-500">People who can be assigned to tasks. Mark yourself as <strong>Me</strong> so your tasks appear in <strong>My Tasks</strong>.</p>
+          <p className="text-sm text-gray-500">Assign functional roles to team members so tasks are automatically routed to the right person.</p>
         </div>
       </div>
 
@@ -249,8 +295,8 @@ export default function TeamPage() {
               <tr className="border-b border-gray-100 bg-gray-50">
                 <SortTh label="Name" col="name" sortKey={sortKey} sortDir={sortDir} onSort={toggle} className="px-5 py-3" />
                 <SortTh label="Email" col="email" sortKey={sortKey} sortDir={sortDir} onSort={toggle} className="px-5 py-3" />
-                <SortTh label="Role" col="role" sortKey={sortKey} sortDir={sortDir} onSort={toggle} className="px-5 py-3 w-28" />
-                <th className="px-5 py-3 w-24 text-left text-xs font-medium text-gray-500">Type</th>
+                <SortTh label="Access" col="role" sortKey={sortKey} sortDir={sortDir} onSort={toggle} className="px-5 py-3 w-28" />
+                <th className="px-5 py-3 w-40 text-left text-xs font-medium text-gray-500">Function</th>
                 <th className="px-5 py-3 w-28" />
               </tr>
             </thead>
@@ -290,19 +336,21 @@ export default function TeamPage() {
                       </td>
                       <td className="px-5 py-3">
                         <select
-                          value={editRole}
-                          onChange={e => setEditRole(e.target.value)}
+                          value={editAccess}
+                          onChange={e => setEditAccess(e.target.value)}
                           className="w-full border border-blue-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
                         >
-                          {ROLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          {ACCESS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
                       </td>
                       <td className="px-5 py-3">
-                        {m.is_me ? (
-                          <span className="text-xs bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-full px-2 py-0.5 font-medium">Me</span>
-                        ) : (
-                          <span className="text-xs text-gray-400">Team</span>
-                        )}
+                        <select
+                          value={editFunction}
+                          onChange={e => setEditFunction(e.target.value)}
+                          className="w-full border border-blue-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                        >
+                          {FUNCTION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2 justify-end">
@@ -325,12 +373,23 @@ export default function TeamPage() {
                   ) : (
                     <>
                       <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-medium text-gray-900">{m.name}</span>
                           {(taskCounts[m.id] ?? 0) > 0 && (
                             <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full">
                               {taskCounts[m.id]} tasks
                             </span>
+                          )}
+                          {m.is_me ? (
+                            <span className="text-xs bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-full px-2 py-0.5 font-medium">Me</span>
+                          ) : (
+                            <button
+                              onClick={() => setAsMe(m)}
+                              className="text-xs text-gray-400 hover:text-indigo-600 hover:underline opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Set as current user"
+                            >
+                              Set as me
+                            </button>
                           )}
                         </div>
                       </td>
@@ -338,24 +397,14 @@ export default function TeamPage() {
                         {m.email ? (
                           <span className="text-sm text-gray-600">{m.email}</span>
                         ) : (
-                          <span className="text-sm text-gray-300 italic">No email</span>
+                          <span className="text-sm text-gray-300">—</span>
                         )}
                       </td>
                       <td className="px-5 py-3">
-                        <RoleBadge role={m.role} />
+                        <AccessBadge role={m.role} />
                       </td>
                       <td className="px-5 py-3">
-                        {m.is_me ? (
-                          <span className="text-xs bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-full px-2 py-0.5 font-medium">Me</span>
-                        ) : (
-                          <button
-                            onClick={() => setAsMe(m)}
-                            className="text-xs text-gray-400 hover:text-indigo-600 hover:underline"
-                            title="Set as current user"
-                          >
-                            Team
-                          </button>
-                        )}
+                        <FunctionBadge fn={m.job_function} />
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
@@ -429,13 +478,23 @@ export default function TeamPage() {
             />
           </div>
           <div className="flex-1 min-w-[120px]">
-            <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Access</label>
             <select
-              value={addRole}
-              onChange={e => setAddRole(e.target.value)}
+              value={addAccess}
+              onChange={e => setAddAccess(e.target.value)}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
             >
-              {ROLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {ACCESS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div className="flex-1 min-w-[160px]">
+            <label className="block text-xs font-medium text-gray-500 mb-1">Function</label>
+            <select
+              value={addFunction}
+              onChange={e => setAddFunction(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+            >
+              {FUNCTION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div className="pt-5">

@@ -74,6 +74,9 @@ export default function EventsPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [revertConfirm, setRevertConfirm] = useState<{ id: number; name: string; destination: 'pipeline' | 'under_review' } | null>(null)
 
+  type BadgeData = { id: number; blocked_tasks: number; overdue_tasks: number; over_budget_items: number; missing_outcomes: number }
+  const [badgeMap, setBadgeMap] = useState<Record<number, BadgeData>>({})
+
   const fetchEvents = () => {
     const params = new URLSearchParams()
     if (statusFilter) params.set('status', statusFilter)
@@ -85,6 +88,13 @@ export default function EventsPage() {
   }
 
   useEffect(() => { fetchEvents() }, [statusFilter, typeFilter])
+
+  useEffect(() => {
+    fetch('/api/events/summary-badges')
+      .then(r => r.json())
+      .then(setBadgeMap)
+      .catch(() => {})
+  }, [])
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -340,6 +350,22 @@ export default function EventsPage() {
                       {event.name}
                     </Link>
                     {event.venue && <div className="text-xs text-gray-400 mt-0.5">{event.venue}</div>}
+                    {badgeMap[event.id] && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {badgeMap[event.id].blocked_tasks > 0 && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">⚠ {badgeMap[event.id].blocked_tasks} blocked</span>
+                        )}
+                        {badgeMap[event.id].overdue_tasks > 0 && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">{badgeMap[event.id].overdue_tasks} overdue</span>
+                        )}
+                        {badgeMap[event.id].over_budget_items > 0 && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">Over budget</span>
+                        )}
+                        {badgeMap[event.id].missing_outcomes > 0 && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">No outcomes</span>
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{TYPE_LABELS[event.type] || event.type}</td>
                   <td className="px-6 py-4">

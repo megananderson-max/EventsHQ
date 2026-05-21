@@ -18,6 +18,11 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       LEFT JOIN vendors v ON bi.vendor_id = v.id
       WHERE bi.id = ?
     `).get(params.bid)
+
+    // Auto-sync event budget_total to sum of planned_amount
+    const sum = db.prepare('SELECT COALESCE(SUM(planned_amount), 0) as t FROM budget_items WHERE event_id = ?').get(params.id) as { t: number }
+    db.prepare('UPDATE events SET budget_total = ? WHERE id = ?').run(sum.t, params.id)
+
     return NextResponse.json(item)
   } catch (error) {
     return NextResponse.json({ error: 'Failed to update budget item' }, { status: 500 })
@@ -28,6 +33,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   try {
     const db = getDb()
     db.prepare('DELETE FROM budget_items WHERE id=? AND event_id=?').run(params.bid, params.id)
+
+    // Auto-sync event budget_total to sum of planned_amount
+    const sum = db.prepare('SELECT COALESCE(SUM(planned_amount), 0) as t FROM budget_items WHERE event_id = ?').get(params.id) as { t: number }
+    db.prepare('UPDATE events SET budget_total = ? WHERE id = ?').run(sum.t, params.id)
+
     return NextResponse.json({ success: true })
   } catch (error) {
     return NextResponse.json({ error: 'Failed to delete budget item' }, { status: 500 })

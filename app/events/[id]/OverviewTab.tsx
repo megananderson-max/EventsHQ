@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Event, EventStatusBadge, EVENT_TYPE_LABELS } from './types'
 
 interface BudgetItem {
@@ -29,6 +29,13 @@ const CATEGORY_COLORS: Record<string, string> = {
   misc: 'bg-gray-400',
 }
 
+interface PlanningItem {
+  id: number
+  title: string
+  done: number
+  status: string | null
+}
+
 export default function OverviewTab({ event, onUpdate, onTabChange }: { event: Event; onUpdate: () => void; onTabChange?: (tab: string) => void }) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -38,6 +45,7 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
   const [form, setForm] = useState({ ...event, budget_total: event.budget_total?.toString() || '0', expected_attendees: event.expected_attendees?.toString() || '' })
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([])
   const [vendorCount, setVendorCount] = useState(0)
+  const [planningItems, setPlanningItems] = useState<PlanningItem[]>([])
   const [taskStats, setTaskStats] = useState({ done: 0, total: 0 })
 
   // Undo complete toast
@@ -62,13 +70,33 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
   useEffect(() => {
     fetch(`/api/events/${event.id}/budget`).then(r => r.json()).then(setBudgetItems).catch(() => {})
     fetch(`/api/events/${event.id}/vendors`).then(r => r.json()).then((data: unknown[]) => setVendorCount(data.length)).catch(() => {})
-    fetch(`/api/events/${event.id}/planning`).then(r => r.json()).then((data: Array<{done: number}>) => {
+    fetch(`/api/events/${event.id}/planning`).then(r => r.json()).then((data: PlanningItem[]) => {
+      setPlanningItems(data)
       setTaskStats({ done: data.filter(t => t.done).length, total: data.length })
     }).catch(() => {})
     fetch(`/api/events/${event.id}/outcomes`).then(r => r.json()).then((data: { attendees_actual?: number | null; pipeline_generated?: number | null; revenue_attributed?: number | null; satisfaction_score?: number | null }) => {
       setHasOutcomes(!!(data && (data.attendees_actual || data.pipeline_generated || data.revenue_attributed || data.satisfaction_score)))
     }).catch(() => {})
   }, [event.id])
+
+  // M1 — blocked tasks derived list
+  const blockedTasks = useMemo(() => planningItems.filter(t => t.status === 'blocked'), [planningItems])
+
+  // M4 — auto-mark event complete when ended and all tasks done
+  useEffect(() => {
+    if (!event) return
+    const todayStr = new Date().toISOString().slice(0, 10)
+    const isEnded = event.end_date && event.end_date < todayStr
+    const isActive = event.status === 'active' || event.status === 'planning'
+    const allDone = taskStats.total === 0 || taskStats.done === taskStats.total
+    if (isEnded && isActive && allDone) {
+      fetch(`/api/events/${event.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'complete' }),
+      }).then(() => { onUpdate() }).catch(() => {})
+    }
+  }, [event?.id, event?.end_date, event?.status, taskStats.done, taskStats.total])
 
   const totalPlanned = budgetItems.reduce((s, i) => s + (i.planned_amount || 0), 0)
   const totalActual = budgetItems.reduce((s, i) => s + (i.actual_amount || 0), 0)
@@ -379,8 +407,17 @@ export default function OverviewTab({ event, onUpdate, onTabChange }: { event: E
       <div className="grid grid-cols-3 gap-4">
         <MetricCard label="Budget Used" value={`${budgetUsedPct}%`} sub={`${formatCurrency(totalActual)} of ${formatCurrency(event.budget_total || 0)}`} color={budgetUsedPct > 100 ? 'red' : 'green'} onClick={() => onTabChange?.('Budget')} hint={totalActual === 0 && totalPlanned === 0 ? 'Set up budget →' : 'View Budget →'} />
         <MetricCard label="Vendors" value={vendorCount.toString()} sub="attached to event" color="blue" onClick={() => onTabChange?.('Vendors')} hint="View Vendors →" />
-        <MetricCard label="Tasks Done" value={`${taskStats.total ? Math.round((taskStats.done / taskStats.total) * 100) : 0}%`} sub={`${taskStats.done} of ${taskStats.total} tasks`} color="purple" onClick={() => onTabChange?.('Planning')} hint={taskStats.total === 0 ? 'Add tasks →' : 'View Planning →'} />
+        <MetricCard label="Tasks Done" value={`${taskStats.total ? Math.round((taskStats.done / taskStats.total) * 100) : 0}%`} sub={`${taskStats.done} of ${taskStats.total} tasks`} color="purple" onClick={() => onTabChange?.('Task List')} hint={taskStats.total === 0 ? 'Add tasks →' : 'View Task List →'} />
       </div>
+
+      {/* M1 — Blocked task escalation banner */}
+      {blockedTasks.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
+          <span className="text-amber-600 text-sm font-semibold">⚠ {blockedTasks.length} blocked task{blockedTasks.length > 1 ? 's' : ''}</span>
+          <span className="text-amber-700 text-xs">{blockedTasks.map(t => t.title).join(' · ')}</span>
+          <button onClick={() => onTabChange?.('Task List')} className="ml-auto text-xs text-amber-700 underline hover:text-amber-900">View →</button>
+        </div>
+      )}
 
       {/* Budget Breakdown */}
       {Object.keys(categories).length > 0 && (

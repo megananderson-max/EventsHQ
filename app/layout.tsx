@@ -64,7 +64,6 @@ function Sidebar() {
   const [notifCount, setNotifCount] = useState(0)
   const [lastSeenCount, setLastSeenCount] = useState(0)
   const [navOrder, setNavOrder] = useState<string[]>([...DEFAULT_ORDER])
-  const [prefsConfigured, setPrefsConfigured] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
   const [newOppsCount, setNewOppsCount] = useState(0)
 
@@ -102,14 +101,6 @@ function Sidebar() {
 
   const dragIdRef = useRef<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
-
-  useEffect(() => {
-    // prefsConfigured is loaded here; nav_order is handled in the mount effect above
-    fetch('/api/settings')
-      .then(r => r.json())
-      .then((s: Record<string, string>) => setPrefsConfigured(s.opp_prefs_configured === 'true'))
-      .catch(() => {})
-  }, [])
 
   useEffect(() => {
     const load = () =>
@@ -283,13 +274,12 @@ function Sidebar() {
             <GripDots />
           </span>
 
-          {item.id === 'my_tasks' || item.id === 'opportunities' ? (
+          {item.id === 'my_tasks' && hasNewTasks ? (
             <div className="relative flex-shrink-0">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.iconPath} />
               </svg>
-              {item.id === 'my_tasks' && hasNewTasks && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />}
-              {item.id === 'opportunities' && !prefsConfigured && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-violet-500 rounded-full" />}
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />
             </div>
           ) : (
             <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

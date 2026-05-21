@@ -7,7 +7,7 @@ const client = new Anthropic()
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const db = getDb()
-    const { responses } = await req.json()
+    const { responses, dry_run } = await req.json() as { responses: string; dry_run?: boolean }
 
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(Number(params.id)) as { name: string; type: string; end_date: string; budget_total: number } | undefined
     if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
@@ -40,6 +40,11 @@ Extract and return ONLY a JSON object with these fields (use null for anything n
     const jsonStart = text.indexOf('{')
     const jsonEnd = text.lastIndexOf('}') + 1
     const extracted = JSON.parse(text.slice(jsonStart, jsonEnd))
+
+    // dry_run: return extracted values without saving (used for preview step in UI)
+    if (dry_run) {
+      return NextResponse.json({ ...extracted, dry_run: true })
+    }
 
     // Save to outcomes
     const existing = (db.prepare('SELECT * FROM event_outcomes WHERE event_id = ?').get(Number(params.id)) ?? {}) as Record<string, unknown>

@@ -38,6 +38,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       LEFT JOIN vendors v ON bi.vendor_id = v.id
       WHERE bi.id = ?
     `).get(result.lastInsertRowid)
+
+    // Auto-sync event budget_total to sum of planned_amount
+    const sum = db.prepare('SELECT COALESCE(SUM(planned_amount), 0) as t FROM budget_items WHERE event_id = ?').get(params.id) as { t: number }
+    db.prepare('UPDATE events SET budget_total = ? WHERE id = ?').run(sum.t, params.id)
+
     return NextResponse.json(item, { status: 201 })
   } catch (error) {
     return NextResponse.json({ error: 'Failed to create budget item' }, { status: 500 })

@@ -190,6 +190,7 @@ function initSchema(db: Database.Database) {
   // Migrate: add first_name + last_name to team_members (older DBs)
   try { db.exec(`ALTER TABLE team_members ADD COLUMN first_name TEXT`) } catch {}
   try { db.exec(`ALTER TABLE team_members ADD COLUMN last_name TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE team_members ADD COLUMN job_function TEXT DEFAULT 'other'`) } catch {}
   // Migrate: add assigned_to + due_date + description to planning_items
   try { db.exec(`ALTER TABLE planning_items ADD COLUMN assigned_to TEXT`) } catch {}
   try { db.exec(`ALTER TABLE planning_items ADD COLUMN due_date TEXT`) } catch {}
@@ -228,6 +229,9 @@ function initSchema(db: Database.Database) {
 
   // Migrate event_outcomes to add meetings_booked column if it doesn't exist
   try { db.exec(`ALTER TABLE event_outcomes ADD COLUMN meetings_booked INTEGER`) } catch {}
+  // Migrate: add computed outcome metrics
+  try { db.exec(`ALTER TABLE event_outcomes ADD COLUMN cost_per_lead REAL`) } catch {}
+  try { db.exec(`ALTER TABLE event_outcomes ADD COLUMN roi REAL`) } catch {}
 
   // Check-ins table — recreate with UNIQUE constraint to prevent duplicate rows
   // Drop and recreate to fix any duplicate rows created before the constraint existed

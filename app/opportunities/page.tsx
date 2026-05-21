@@ -202,6 +202,7 @@ export default function OpportunitiesPage() {
 
   // Filter/sort
   const [searchQuery, setSearchQuery] = useState<string>('')
+  const [filterActSoon, setFilterActSoon] = useState<boolean>(false)
   const [filterFit, setFilterFit] = useState<string>('all')
   const [filterRec, setFilterRec] = useState<string>('all')
   const [filterRegion, setFilterRegion] = useState<string>('all')
@@ -228,6 +229,11 @@ export default function OpportunitiesPage() {
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null)
   const [showScanSettings, setShowScanSettings] = useState(false)
   const [savingFreq, setSavingFreq] = useState(false)
+  const [apifyConfigured, setApifyConfigured] = useState(false)
+  const [apifyScanning, setApifyScanning] = useState(false)
+  const [apifyLastAdded, setApifyLastAdded] = useState<number | null>(null)
+  const [apifyKeyInput, setApifyKeyInput] = useState('')
+  const [apifySavingKey, setApifySavingKey] = useState(false)
   const [oppView, setOppView] = useState<'cards' | 'list'>(() => {
     if (typeof window !== 'undefined') {
       const v = localStorage.getItem('opp_view')
@@ -247,6 +253,9 @@ export default function OpportunitiesPage() {
   // Stale-warning state (M1 + M2)
   const [today, setToday] = useState('')
   const [dismissedStaleBanner, setDismissedStaleBanner] = useState(false)
+
+  // M3: historical event matching
+  const [historicalEvents, setHistoricalEvents] = useState<{id: number; name: string; start_date: string; has_outcomes: number}[]>([])
 
   useEffect(() => { setToday(new Date().toISOString().split('T')[0]) }, [])
 
@@ -283,6 +292,39 @@ export default function OpportunitiesPage() {
     })
   }
 
+  const saveApifyKey = async () => {
+    if (!apifyKeyInput.trim()) return
+    setApifySavingKey(true)
+    await fetch('/api/opportunities/apify-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apify_api_key: apifyKeyInput.trim() }),
+    }).catch(() => {})
+    setApifyConfigured(true)
+    setApifyKeyInput('')
+    setApifySavingKey(false)
+  }
+
+  const runApifyScan = async () => {
+    setApifyScanning(true)
+    try {
+      const res = await fetch('/api/opportunities/apify-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json() as { added?: number; error?: string }
+      if (data.error) { alert(`Apify scan error: ${data.error}`); return }
+      setApifyLastAdded(data.added ?? 0)
+      if ((data.added ?? 0) > 0) {
+        const fresh = await fetch('/api/opportunities').then(r => r.json())
+        if (fresh.opportunities?.length) { setOpportunities(fresh.opportunities); setGeneratedAt(fresh.generated_at) }
+      }
+    } catch { /* non-fatal */ } finally {
+      setApifyScanning(false)
+    }
+  }
+
   const toggleEnabled = async () => {
     if (!scanStatus) return
     const next = !scanStatus.enabled
@@ -300,8 +342,10 @@ export default function OpportunitiesPage() {
       fetch('/api/opportunities').then(r => r.json()),
       fetch('/api/opportunities/auto-scan').then(r => r.json()),
       fetch('/api/settings').then(r => r.json()),
+      fetch('/api/opportunities/historical-matches').then(r => r.json()).catch(() => []),
+      fetch('/api/opportunities/apify-scan').then(r => r.json()).catch(() => null),
     ])
-      .then(([data, status, settings]) => {
+      .then(([data, status, settings, historical, apify]) => {
         if (data.opportunities?.length) {
           setOpportunities(data.opportunities)
           setGeneratedAt(data.generated_at)
@@ -310,6 +354,8 @@ export default function OpportunitiesPage() {
         if (settings.opp_focus_areas) setUserFocusAreas(settings.opp_focus_areas.split(',').filter(Boolean))
         if (settings.opp_regions)     setUserRegions(settings.opp_regions.split(',').filter(Boolean))
         if (settings.opp_visible_filters) setVisibleFilters(settings.opp_visible_filters.split(',').filter(Boolean))
+        if (Array.isArray(historical)) setHistoricalEvents(historical)
+        if (apify) { setApifyConfigured(apify.configured); setApifyLastAdded(apify.last_added ?? null) }
       })
       .finally(() => setInitialLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -639,6 +685,7 @@ export default function OpportunitiesPage() {
       )
     })
     .filter(o => !filterNew || isNew(o))
+    .filter(o => !filterActSoon || (o.strategic_fit === 'High' && !o.added_to_events && !!o.start_date && daysUntil(o.start_date) >= 0 && daysUntil(o.start_date) <= 45))
     .filter(o => filterFit === 'all' || o.strategic_fit === filterFit)
     .filter(o => filterRec === 'all' || o.recommendation === filterRec)
     .filter(o => {
@@ -724,6 +771,27 @@ export default function OpportunitiesPage() {
   const reviewCount = underReviewOpps.length
   const doNotAttendCount = doNotAttendOpps.length
   const competitorCount = pipelineOpps.filter(o => o.is_competitor_event).length
+
+  // M3: fuzzy-match helper — strips year, compares core name tokens
+  const findHistoricalMatch = (oppName: string) => {
+    const lower = oppName.toLowerCase().replace(/\d{4}/, '').trim()
+    return historicalEvents.find(e => {
+      const eName = e.name.toLowerCase().replace(/\d{4}/, '').trim()
+      return eName.includes(lower) || lower.includes(eName) ||
+        (lower.length > 6 && eName.length > 6 && (
+          eName.startsWith(lower.slice(0, 8)) || lower.startsWith(eName.slice(0, 8))
+        ))
+    })
+  }
+
+  // H1: "Decide Soon" pinned queue — pipeline opps closing within 45 days
+  const decideSoonOpps = pipelineOpps.filter(o => {
+    if (o.strategic_fit !== 'High') return false
+    if (o.added_to_events) return false
+    if (!o.start_date) return false
+    const days = daysUntil(o.start_date)
+    return days >= 0 && days <= 45
+  })
 
   const focusLabel = FOCUS_AREAS.find(f => f.val === focusArea)?.label || 'All Focus Areas'
   const regionLabel = REGIONS.find(r => r.val === region)?.label || 'Global'
@@ -1115,6 +1183,32 @@ export default function OpportunitiesPage() {
                 </>
               )}
             </button>
+            {apifyConfigured && (
+              <button
+                onClick={runApifyScan}
+                disabled={apifyScanning}
+                title="Scan X / Twitter for new events via Apify"
+                className="flex items-center gap-1.5 text-xs text-sky-600 hover:text-sky-800 border border-sky-200 bg-sky-50 hover:bg-sky-100 rounded-lg px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {apifyScanning ? (
+                  <>
+                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    Scanning X…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.747l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                    Scan X / Twitter
+                    {apifyLastAdded !== null && apifyLastAdded > 0 && (
+                      <span className="text-[10px] bg-sky-200 text-sky-800 font-bold px-1.5 py-0.5 rounded-full">+{apifyLastAdded}</span>
+                    )}
+                  </>
+                )}
+              </button>
+            )}
           <button
             onClick={() => setShowScanSettings(s => !s)}
             className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition-colors flex-shrink-0"
@@ -1133,6 +1227,7 @@ export default function OpportunitiesPage() {
 
         {/* Settings panel */}
         {showScanSettings && (
+          <>
           <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-6 flex-wrap text-sm">
             <label className="flex items-center gap-2 cursor-pointer">
               <div
@@ -1188,6 +1283,45 @@ export default function OpportunitiesPage() {
               When enabled, AI automatically searches the web for new events matching your preferences and adds the best ones to your pipeline.
             </div>
           </div>
+
+          {/* Apify / X (Twitter) integration */}
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <div className="flex items-center gap-2 mb-2">
+              <svg className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.747l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+              <span className="text-xs font-medium text-gray-700">X / Twitter scanning via Apify</span>
+              {apifyConfigured && (
+                <span className="text-[10px] bg-sky-100 text-sky-700 font-semibold px-1.5 py-0.5 rounded-full">Connected</span>
+              )}
+            </div>
+            {apifyConfigured ? (
+              <p className="text-xs text-gray-500">
+                API key saved. Use <strong>Scan X / Twitter</strong> above to search for events mentioned on X.{' '}
+                <button onClick={() => { setApifyConfigured(false); setApifyKeyInput('') }} className="text-red-400 hover:text-red-600 hover:underline">Remove key</button>
+              </p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={apifyKeyInput}
+                  onChange={e => setApifyKeyInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && apifyKeyInput.trim()) saveApifyKey() }}
+                  placeholder="Paste your Apify API key…"
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400"
+                />
+                <button
+                  onClick={saveApifyKey}
+                  disabled={apifySavingKey || !apifyKeyInput.trim()}
+                  className="flex-shrink-0 px-3 py-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+                >
+                  {apifySavingKey ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            )}
+            <p className="text-[10px] text-gray-400 mt-1.5">
+              Searches X / Twitter for event announcements matching your preferences. Requires an Apify account with the <strong>apidojo/tweet-scraper</strong> actor enabled.
+            </p>
+          </div>
+          </>
         )}
       </div>
 
@@ -1419,18 +1553,29 @@ export default function OpportunitiesPage() {
                                 {fmt(opp.budget_estimate_low!)} – {fmt(opp.budget_estimate_high!)}
                               </span>
                             )}
-                            {opp.website && (
-                              <a href={opp.website} target="_blank" rel="noopener noreferrer"
-                                className="flex items-center gap-1 text-blue-500 hover:text-blue-700 hover:underline font-medium">
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                                Website
-                              </a>
-                            )}
+                            <a href={opp.website || `https://www.google.com/search?q=${encodeURIComponent(opp.name)}`} target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-blue-500 hover:text-blue-700 hover:underline font-medium">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                              {opp.website ? 'Website' : 'Search →'}
+                            </a>
                           </div>
                           {/* Description */}
                           {opp.description && (
                             <p className="text-sm text-gray-600 mb-2 leading-relaxed">{opp.description}</p>
                           )}
+                          {/* M3: Historical match badge */}
+                          {(() => {
+                            const match = findHistoricalMatch(opp.name)
+                            if (!match || match.has_outcomes === 0) return null
+                            return (
+                              <p className="text-xs text-indigo-600 mb-1.5">
+                                📋 Attended in {match.start_date?.slice(0, 4) ?? '—'} ·{' '}
+                                <a href={`/events/${match.id}?tab=outcomes`} className="underline underline-offset-2 hover:text-indigo-800">
+                                  View outcomes →
+                                </a>
+                              </p>
+                            )
+                          })()}
                           {/* review_notes for Under Review items */}
                           {opp.status === 'pending_approval' && opp.review_notes && (
                             <p className="text-xs text-amber-700 italic mt-1">{opp.review_notes}</p>
@@ -1566,13 +1711,11 @@ export default function OpportunitiesPage() {
                       {(opp.budget_estimate_low || opp.budget_estimate_high) && (
                         <span>💰 {opp.budget_estimate_low && opp.budget_estimate_high ? `${fmt(opp.budget_estimate_low)} – ${fmt(opp.budget_estimate_high)}` : fmt(opp.budget_estimate_high || opp.budget_estimate_low || 0)}</span>
                       )}
-                      {opp.website && (
-                        <a href={opp.website} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-blue-500 hover:text-blue-700 hover:underline font-medium">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                          Website
-                        </a>
-                      )}
+                      <a href={opp.website || `https://www.google.com/search?q=${encodeURIComponent(opp.name)}`} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-blue-500 hover:text-blue-700 hover:underline font-medium">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                        {opp.website ? 'Website' : 'Search →'}
+                      </a>
                     </div>
                     {opp.description && <p className="text-sm text-gray-600 mb-2">{opp.description}</p>}
                     {opp.speaking_opportunity && (
@@ -1581,6 +1724,19 @@ export default function OpportunitiesPage() {
                         <span><strong>Speaking:</strong> {opp.speaking_opportunity}</span>
                       </div>
                     )}
+                    {/* M3: Historical match badge */}
+                    {(() => {
+                      const match = findHistoricalMatch(opp.name)
+                      if (!match || match.has_outcomes === 0) return null
+                      return (
+                        <p className="text-xs text-indigo-600 mb-2">
+                          📋 Attended in {match.start_date?.slice(0, 4) ?? '—'} ·{' '}
+                          <a href={`/events/${match.id}?tab=outcomes`} className="underline underline-offset-2 hover:text-indigo-800">
+                            View outcomes →
+                          </a>
+                        </p>
+                      )
+                    })()}
                     {/* Review Notes */}
                     <div className="mt-3 pt-3 border-t border-amber-100">
                       <div className="flex items-center justify-between mb-1.5">
@@ -1673,13 +1829,11 @@ export default function OpportunitiesPage() {
                       <div className="flex flex-wrap gap-3 text-xs text-gray-400 mb-2">
                         {opp.start_date && <span>📅 {new Date(opp.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>}
                         {opp.location && <span>📍 {opp.location}</span>}
-                        {opp.website && (
-                          <a href={opp.website} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-blue-400 hover:text-blue-600 hover:underline font-medium">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                            Website
-                          </a>
-                        )}
+                        <a href={opp.website || `https://www.google.com/search?q=${encodeURIComponent(opp.name)}`} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-blue-400 hover:text-blue-600 hover:underline font-medium">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                          {opp.website ? 'Website' : 'Search →'}
+                        </a>
                       </div>
                     </div>
                     <div className="flex flex-col gap-2 flex-shrink-0 w-40">
@@ -1824,6 +1978,7 @@ export default function OpportunitiesPage() {
         </div>
       )}
 
+
       {/* ── OPPORTUNITIES TAB ──────────────────────────────────────────────── */}
       {/* Search bar */}
       {pageTab === 'opportunities' && opportunities.length > 0 && (
@@ -1852,6 +2007,18 @@ export default function OpportunitiesPage() {
       {pageTab === 'opportunities' && opportunities.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl px-5 py-3 mb-5 flex flex-col gap-3">
           <div className="flex items-center gap-4 flex-wrap">
+            {decideSoonOpps.length > 0 && (
+              <>
+                <button
+                  onClick={() => setFilterActSoon(f => !f)}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${filterActSoon ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 text-amber-700 border-amber-300 hover:border-amber-500'}`}
+                >
+                  ⏰ Act soon
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${filterActSoon ? 'bg-amber-400 text-white' : 'bg-amber-200 text-amber-800'}`}>{decideSoonOpps.length}</span>
+                </button>
+                <div className="w-px h-5 bg-gray-200" />
+              </>
+            )}
             {visibleFilters.includes('fit') && (
               <div className="flex items-center gap-1.5 text-xs">
                 <span className="text-gray-500 font-medium mr-1">Fit:</span>
@@ -2189,6 +2356,7 @@ export default function OpportunitiesPage() {
           <div className="space-y-3">
             {filtered.map((opp, i) => {
               const isExpanded = expandedId === (opp.id || i)
+              const historicalMatch = findHistoricalMatch(opp.name)
               return (
                 <div
                   key={opp.id || i}
@@ -2249,6 +2417,21 @@ export default function OpportunitiesPage() {
                           ) : null}
                         </div>
 
+                        {/* M3: Historical match badge */}
+                        {historicalMatch && historicalMatch.has_outcomes > 0 && (
+                          <div className="mb-1.5">
+                            <span className="text-xs text-indigo-600">
+                              📋 Attended in {historicalMatch.start_date?.slice(0, 4) ?? '—'} ·{' '}
+                              <a
+                                href={`/events/${historicalMatch.id}?tab=outcomes`}
+                                className="underline underline-offset-2 hover:text-indigo-800"
+                              >
+                                View outcomes →
+                              </a>
+                            </span>
+                          </div>
+                        )}
+
                         {/* Meta row */}
                         <div className="flex items-center gap-4 text-xs text-gray-500 mb-3 flex-wrap">
                           {opp.start_date && (
@@ -2278,13 +2461,11 @@ export default function OpportunitiesPage() {
                             </span>
                           )}
                           {opp.organizer && <span className="text-gray-400">by {opp.organizer}</span>}
-                          {opp.website && (
-                            <a href={opp.website} target="_blank" rel="noopener noreferrer"
-                              className="flex items-center gap-1 text-blue-500 hover:text-blue-700 hover:underline font-medium">
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                              Website
-                            </a>
-                          )}
+                          <a href={opp.website || `https://www.google.com/search?q=${encodeURIComponent(opp.name)}`} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-blue-500 hover:text-blue-700 hover:underline font-medium">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                            {opp.website ? 'Website' : 'Search →'}
+                          </a>
                         </div>
 
                         {/* Description */}
