@@ -1,5 +1,3 @@
-'use client'
-
 const AI_BADGE = (
   <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-violet-600 text-white px-1.5 py-0.5 rounded-full leading-none">
     <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -157,7 +155,7 @@ export default function WorkflowPage() {
         <div className="absolute left-[27px] top-10 bottom-10 w-0.5 bg-gradient-to-b from-violet-200 via-blue-200 to-violet-200 z-0" />
 
         <div className="space-y-6">
-          {STEPS.map((step, idx) => {
+          {STEPS.map((step) => {
             const c = COLOR_MAP[step.color] || COLOR_MAP.blue
             return (
               <div key={step.number} className="relative flex gap-5 z-10">
