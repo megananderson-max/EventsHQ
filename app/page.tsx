@@ -190,6 +190,13 @@ export default function Dashboard() {
     return evtDir === 'asc' ? cmp : -cmp
   }).slice(0, 8)
 
+  const totalUnderReviewEstimate = underReview.reduce((sum, o) => {
+    const est = o.budget_estimate_high != null && o.budget_estimate_low != null
+      ? (o.budget_estimate_high + o.budget_estimate_low) / 2
+      : (o.budget_estimate_high ?? o.budget_estimate_low ?? 0)
+    return sum + est
+  }, 0)
+
   return (
     <div className="p-8">
       {prefsLoaded && showSetupModal && (
@@ -400,6 +407,9 @@ export default function Dashboard() {
                   {underReview.slice(0, 3).map(o => o.name).join(' · ')}
                   {underReview.length > 3 ? ` · +${underReview.length - 3} more` : ''}
                 </p>
+                {totalUnderReviewEstimate > 0 && (
+                  <p className="text-xs text-gray-400 mt-0.5">Est. budget: {formatCurrency(totalUnderReviewEstimate)}</p>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-1.5 text-sm font-medium text-amber-600 group-hover:text-amber-700">

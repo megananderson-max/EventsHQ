@@ -267,6 +267,9 @@ export default function OutcomesTab({ eventId, event }: OutcomesTabProps) {
   const [debriefLoading, setDebriefLoading] = useState(false)
   const [debriefError, setDebriefError] = useState<string | null>(null)
   const [debriefPreview, setDebriefPreview] = useState<Partial<OutcomesData> & { extraction_summary?: string } | null>(null)
+  const [debriefUrl, setDebriefUrl] = useState('')
+  const [debriefUrlLoading, setDebriefUrlLoading] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
   const [previewSaving, setPreviewSaving] = useState(false)
   const [notesEdit, setNotesEdit] = useState(false)
   const [notesVal, setNotesVal] = useState('')
@@ -343,6 +346,54 @@ export default function OutcomesTab({ eventId, event }: OutcomesTabProps) {
     })
     fetchOutcomes()
     setNotesEdit(false)
+  }
+
+  const fetchUrlContent = async () => {
+    if (!debriefUrl.trim()) return
+    setDebriefUrlLoading(true)
+    setDebriefError(null)
+    try {
+      const res = await fetch('/api/fetch-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: debriefUrl.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch URL')
+      setDebriefText(data.text)
+      setDebriefUrl('')
+    } catch (e: unknown) {
+      setDebriefError(e instanceof Error ? e.message : 'Failed to fetch URL')
+    } finally {
+      setDebriefUrlLoading(false)
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = () => {
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (!file) return
+    const supported = ['.txt', '.md', '.csv']
+    const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+    if (!supported.includes(ext)) {
+      setDebriefError('Only .txt, .md, and .csv files are supported for drag and drop.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = ev => {
+      setDebriefText(ev.target?.result as string ?? '')
+    }
+    reader.readAsText(file)
   }
 
   // Step 1: extract (dry run — no save)
@@ -564,13 +615,48 @@ export default function OutcomesTab({ eventId, event }: OutcomesTabProps) {
 
           {!debriefPreview ? (
             <>
-              <textarea
-                value={debriefText}
-                onChange={e => setDebriefText(e.target.value)}
-                placeholder={getDebriefPlaceholder(event.type)}
-                rows={5}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-y"
-              />
+              {/* URL input row */}
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={debriefUrl}
+                  onChange={e => setDebriefUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') fetchUrlContent() }}
+                  placeholder="Paste a link to a doc, Notion page, or Google Doc…"
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                />
+                <button
+                  onClick={fetchUrlContent}
+                  disabled={debriefUrlLoading || !debriefUrl.trim()}
+                  className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap"
+                >
+                  {debriefUrlLoading ? (
+                    <>
+                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                      Fetching…
+                    </>
+                  ) : 'Fetch'}
+                </button>
+              </div>
+
+              {/* Drag-and-drop zone wrapping the textarea */}
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`rounded-lg transition-colors ${isDragOver ? 'border-2 border-violet-400 bg-violet-50' : ''}`}
+              >
+                <textarea
+                  value={debriefText}
+                  onChange={e => setDebriefText(e.target.value)}
+                  placeholder={getDebriefPlaceholder(event.type)}
+                  rows={5}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-y"
+                />
+              </div>
+
+              <p className="text-xs text-gray-400">Drag &amp; drop a .txt file, paste a link above, or type your notes here.</p>
+
               {debriefError && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{debriefError}</div>
               )}

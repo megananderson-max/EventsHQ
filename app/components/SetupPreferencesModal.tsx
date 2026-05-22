@@ -146,27 +146,27 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       }
       if (!res.ok || !data.success) throw new Error(data.error || 'Auto-populate failed')
       const p = data.profile!
-      const enrichedName = p.company_name || ''
-      if (enrichedName) setCompanyName(enrichedName)
-      if (p.company_description) setCustomerProfile(p.company_description)
-      if (Array.isArray(p.focus_areas) && p.focus_areas.length) {
-        setFocusAreas(p.focus_areas.filter(v => VALID_FOCUS_AREAS.includes(v)))
-      }
-      if (Array.isArray(p.regions) && p.regions.length) {
-        setRegions(p.regions.filter(v => VALID_REGIONS.includes(v)))
-      }
-      if (p.speaker_name) setSpeakerName(p.speaker_name)
 
-      // Add enriched company as first entry in companies list
-      if (enrichedName || websiteInput.trim()) {
-        const newCompany: CompanyProfile = {
-          id: Date.now().toString(),
-          name: enrichedName || websiteInput.trim(),
-          website_url: websiteInput.trim(),
-          description: p.company_description,
-        }
-        setCompanies([newCompany])
+      // Build local variables from extracted data (don't rely on state being updated)
+      const enrichedName = p.company_name || ''
+      const extractedProfile = p.company_description || ''
+      const extractedFocusAreas = Array.isArray(p.focus_areas) ? p.focus_areas.filter(v => VALID_FOCUS_AREAS.includes(v)) : []
+      const extractedRegions = Array.isArray(p.regions) ? p.regions.filter(v => VALID_REGIONS.includes(v)) : []
+      const extractedSpeakerName = p.speaker_name || ''
+      const newCompany: CompanyProfile = {
+        id: Date.now().toString(),
+        name: enrichedName || websiteInput.trim(),
+        website_url: websiteInput.trim(),
+        description: p.company_description,
       }
+
+      // Update state for display consistency
+      if (enrichedName) setCompanyName(enrichedName)
+      if (extractedProfile) setCustomerProfile(extractedProfile)
+      if (extractedFocusAreas.length) setFocusAreas(extractedFocusAreas)
+      if (extractedRegions.length) setRegions(extractedRegions)
+      if (extractedSpeakerName) setSpeakerName(extractedSpeakerName)
+      setCompanies([newCompany])
 
       // Extract domain for the banner
       try {
@@ -175,8 +175,50 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
         setEnrichedFrom(websiteInput.trim())
       }
 
-      setMode('manual')
-      setEnrichStep('form')
+      // Save directly to API using local variables — skip the manual review form step
+      setSaving(true)
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          opp_prefs_configured: 'true',
+          user_name: yourName.trim(),
+          opp_company_name: newCompany.name,
+          opp_brands: brands.trim(),
+          opp_speaker_name: extractedSpeakerName,
+          opp_customer_profile: extractedProfile,
+          opp_focus_areas: extractedFocusAreas.join(','),
+          opp_regions: extractedRegions.join(','),
+          company_profiles: [newCompany],
+        }),
+      })
+      setSaving(false)
+
+      if (isFirstTime) {
+        setMode('vendor_review')
+        setVendorLoading(true)
+        fetch('/api/vendors/seed-from-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            focus_areas: extractedFocusAreas,
+            regions: extractedRegions,
+            company_name: newCompany.name,
+            customer_profile: extractedProfile,
+          }),
+        })
+          .then(r => r.json())
+          .then((seedData: { success: boolean; vendors?: VendorSuggestion[] }) => {
+            if (seedData.success && Array.isArray(seedData.vendors)) {
+              setVendorSuggestions(seedData.vendors)
+              setSelectedVendors(new Set(seedData.vendors.map((_, i) => i)))
+            }
+          })
+          .catch(() => {})
+          .finally(() => setVendorLoading(false))
+      } else {
+        onSaved()
+      }
     } catch (e) {
       setEnrichError(e instanceof Error ? e.message : 'Auto-populate failed')
     } finally {
