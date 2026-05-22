@@ -128,6 +128,20 @@ export async function POST(req: NextRequest) {
 
   const existingNames = (db.prepare('SELECT name FROM opportunities').all() as { name: string }[]).map(r => r.name)
 
+  // Fetch Do Not Attend signals to teach the AI what to avoid
+  const dnaSignals = (db.prepare(`
+    SELECT name, dna_notes, competitor_name, is_competitor_event, focus_area
+    FROM opportunities
+    WHERE status = 'do_not_attend' AND (dna_notes IS NOT NULL OR competitor_name IS NOT NULL)
+    ORDER BY updated_at DESC LIMIT 30
+  `).all() as Array<{ name: string; dna_notes: string | null; competitor_name: string | null; is_competitor_event: number; focus_area: string | null }>)
+
+  const dnaBlock = dnaSignals.length > 0
+    ? `\nEvents the user has explicitly rejected — do NOT suggest similar events:\n${dnaSignals.map(d =>
+        `- "${d.name}"${d.is_competitor_event ? ' [competitor]' : ''}${d.competitor_name ? ` by ${d.competitor_name}` : ''}${d.dna_notes ? `: ${d.dna_notes}` : ''}`
+      ).join('\n')}\n`
+    : ''
+
   const prompt = `You are analyzing tweets to extract B2B event opportunities for a company.
 
 Company context: ${companyName || 'a B2B software company'}
@@ -137,7 +151,7 @@ Regions: ${regions.join(', ') || 'global'}
 
 Already-known events (do not duplicate):
 ${existingNames.slice(0, 50).join(', ')}
-
+${dnaBlock}
 Tweets:
 ${tweetText}
 

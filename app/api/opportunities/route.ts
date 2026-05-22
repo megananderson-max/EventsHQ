@@ -55,6 +55,28 @@ export async function POST(req: NextRequest) {
     const existingOppNamesArr = (db.prepare('SELECT name FROM opportunities').all() as { name: string }[]).map(o => o.name.toLowerCase())
 
     const existingList = existing.map(e => `- ${e.name} (${e.type}, ${e.location || ''}, ${e.start_date || ''})`).join('\n') || 'None yet'
+
+    // Fetch Do Not Attend signals to teach the AI what to avoid
+    const dnaSignals = db.prepare(`
+      SELECT name, dna_notes, competitor_name, is_competitor_event, focus_area, location
+      FROM opportunities
+      WHERE status = 'do_not_attend' AND (dna_notes IS NOT NULL OR competitor_name IS NOT NULL)
+      ORDER BY updated_at DESC LIMIT 40
+    `).all() as Array<{ name: string; dna_notes: string | null; competitor_name: string | null; is_competitor_event: number; focus_area: string | null; location: string | null }>
+
+    const dnaSection = dnaSignals.length > 0 ? `
+═══════════════════════════════════════════════════
+REJECTED EVENTS — LEARN FROM THESE SIGNALS:
+═══════════════════════════════════════════════════
+The user has explicitly marked the following events as "Do Not Attend" and provided reasons. Use these as negative training signals — do NOT suggest events with similar profiles, organizers, audiences, or formats:
+
+${dnaSignals.map(d =>
+  `- "${d.name}"${d.is_competitor_event ? ' [COMPETITOR EVENT]' : ''}${d.competitor_name ? ` (run by ${d.competitor_name})` : ''}${d.focus_area ? ` [${d.focus_area}]` : ''}${d.location ? ` — ${d.location}` : ''}${d.dna_notes ? `\n  Reason: ${d.dna_notes}` : ''}`
+).join('\n')}
+
+Apply these signals to filter out similar events from your results. If a reason mentions "too expensive", de-prioritize high-cost events in that category. If a reason mentions "wrong audience", avoid events with similar attendee profiles. If a reason mentions a specific organizer, avoid other events by that organizer.
+` : ''
+
     const now = new Date().toISOString()
 
     // Build focus area guidance
@@ -237,7 +259,7 @@ ${existingList}
 
 ALSO DO NOT DUPLICATE THESE EVENTS ALREADY IN OPPORTUNITIES DATABASE:
 ${existingOppNamesArr.map(n => `- ${n}`).join('\n') || 'None'}
-
+${dnaSection}
 ═══════════════════════════════════════════════════
 YOUR TASK
 ═══════════════════════════════════════════════════

@@ -6,7 +6,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
 import SetupPreferencesModal from '@/app/components/SetupPreferencesModal'
 
-const DEFAULT_ORDER = ['dashboard', 'events', 'opportunities', 'vendors', 'outcomes', 'my_tasks', 'team', 'calendar']
+const DEFAULT_ORDER = ['dashboard', 'events', 'opportunities', 'vendors', 'outcomes', 'my_tasks', 'team', 'calendar', 'workflow']
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -207,6 +207,10 @@ function Sidebar() {
     calendar: {
       id: 'calendar', label: 'Calendar', href: '/calendar', active: pathname.startsWith('/calendar'),
       iconPath: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
+    },
+    workflow: {
+      id: 'workflow', label: 'How It Works', description: 'AI workflow · learning loop', href: '/workflow', active: pathname.startsWith('/workflow'),
+      iconPath: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
     },
   }), [pathname, isOpportunitiesActive, currentTab])
 
