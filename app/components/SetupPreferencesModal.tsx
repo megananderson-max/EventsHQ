@@ -72,6 +72,7 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
   const [enrichStep, setEnrichStep]                   = useState<'url_input' | 'form'>(isFirstTime ? 'url_input' : 'form')
   const [websiteInput, setWebsiteInput]               = useState('')
   const [linkedinInput, setLinkedinInput]             = useState('')
+  const [additionalUrls, setAdditionalUrls]           = useState<string[]>([])
   const [enrichLoading, setEnrichLoading]             = useState(false)
   const [enrichError, setEnrichError]                 = useState<string | null>(null)
   const [enrichedFrom, setEnrichedFrom]               = useState<string | null>(null)
@@ -130,7 +131,11 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
       const res = await fetch('/api/enrich-profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ websiteUrl: websiteInput.trim(), linkedinUrl: linkedinInput.trim() || undefined }),
+        body: JSON.stringify({
+          websiteUrl: websiteInput.trim(),
+          linkedinUrl: linkedinInput.trim() || undefined,
+          additionalUrls: additionalUrls.filter(u => u.trim()),
+        }),
       })
       const data = await res.json() as {
         success: boolean
@@ -448,19 +453,54 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
         />
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-2">
         <label className="block text-sm font-semibold text-gray-700">
-          LinkedIn company page <span className="text-gray-400 font-normal">(optional)</span>
+          Additional pages to scan <span className="text-gray-400 font-normal">(optional)</span>
         </label>
+        <p className="text-xs text-gray-400">Add LinkedIn, Twitter/X, Instagram, Crunchbase, or any other page — the more you add, the richer the profile.</p>
         <input
           type="url"
           value={linkedinInput}
           onChange={e => setLinkedinInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && websiteInput.trim() && !enrichLoading) runEnrich() }}
-          placeholder="https://linkedin.com/company/... (optional)"
+          placeholder="https://linkedin.com/company/…"
           className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
           disabled={enrichLoading}
         />
+        {additionalUrls.map((url, i) => (
+          <div key={i} className="flex gap-2">
+            <input
+              type="url"
+              value={url}
+              onChange={e => setAdditionalUrls(prev => prev.map((u, j) => j === i ? e.target.value : u))}
+              onKeyDown={e => { if (e.key === 'Enter' && websiteInput.trim() && !enrichLoading) runEnrich() }}
+              placeholder={i === 0 ? 'https://twitter.com/yourcompany' : i === 1 ? 'https://crunchbase.com/organization/…' : 'https://…'}
+              className="flex-1 border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              disabled={enrichLoading}
+            />
+            <button
+              type="button"
+              onClick={() => setAdditionalUrls(prev => prev.filter((_, j) => j !== i))}
+              className="text-gray-300 hover:text-red-400 px-2 transition-colors"
+              title="Remove"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => setAdditionalUrls(prev => [...prev, ''])}
+          disabled={enrichLoading}
+          className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium disabled:opacity-40 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+          </svg>
+          Add another page
+        </button>
       </div>
 
       {enrichError && (

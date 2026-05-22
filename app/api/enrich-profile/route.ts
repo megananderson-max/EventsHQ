@@ -7,18 +7,32 @@ const client = new Anthropic()
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { websiteUrl, linkedinUrl } = body as { websiteUrl: string; linkedinUrl?: string }
+    const { websiteUrl, linkedinUrl, additionalUrls } = body as {
+      websiteUrl: string
+      linkedinUrl?: string
+      additionalUrls?: string[]
+    }
 
     if (!websiteUrl?.trim()) {
       return NextResponse.json({ success: false, error: 'websiteUrl is required' }, { status: 400 })
     }
 
+    const extraUrls = [
+      linkedinUrl?.trim(),
+      ...(additionalUrls ?? []).map(u => u.trim()),
+    ].filter(Boolean) as string[]
+
+    const extraSteps = extraUrls.length
+      ? extraUrls.map((u, i) => `${i + 2}. Fetch this additional page: ${u}`).join('\n')
+      : '2. Skip (no additional pages provided)'
+    const finalStep = extraUrls.length + 2
+
     const prompt = `You are a company research assistant. Your job is to build a company profile by fetching web pages.
 
 Follow these steps in order:
 1. Fetch the company website: ${websiteUrl}
-2. ${linkedinUrl?.trim() ? `Fetch the LinkedIn page: ${linkedinUrl}` : 'Skip LinkedIn (not provided)'}
-3. If you need more context (e.g. about their industry or leadership), run one targeted web search.
+${extraSteps}
+${finalStep}. If you need more context (e.g. about their industry or leadership), run one targeted web search.
 
 After gathering information, return ONLY a JSON object (no markdown fences, no other text) with these fields:
 
