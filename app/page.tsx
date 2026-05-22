@@ -488,14 +488,22 @@ function buildQuarters(back = 4, fwd = 6) {
 }
 
 function QuarterSnapshot({ events, opportunities, loading }: { events: Event[]; opportunities: Opportunity[]; loading: boolean }) {
-  const quarters = buildQuarters(4, 8)
-  const currentIdx = quarters.findIndex(q => q.isCurrent)
-  // Default window: show current quarter as the 2nd column (1 quarter of history visible)
-  const [windowStart, setWindowStart] = useState(Math.max(0, currentIdx - 1))
+  const [quarters, setQuarters] = useState<ReturnType<typeof buildQuarters>>([])
+  const [windowStart, setWindowStart] = useState(0)
+  const [today, setToday] = useState('')
+  const [currentYear, setCurrentYear] = useState(0)
   const [showDetails, setShowDetails] = useState(false)
 
-  const today = new Date().toISOString().slice(0, 10)
-  const currentYear = new Date().getFullYear()
+  // Initialise date-dependent values client-side only to avoid hydration mismatch
+  useEffect(() => {
+    const q = buildQuarters(4, 8)
+    const currentIdx = q.findIndex(qq => qq.isCurrent)
+    setQuarters(q)
+    setWindowStart(Math.max(0, currentIdx - 1))
+    setToday(new Date().toISOString().slice(0, 10))
+    setCurrentYear(new Date().getFullYear())
+  }, [])
+
   const visible = quarters.slice(windowStart, windowStart + 4)
 
   const qData = visible.map(q => {
