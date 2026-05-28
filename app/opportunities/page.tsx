@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useSession, signIn } from 'next-auth/react'
 import SetupPreferencesModal from '@/app/components/SetupPreferencesModal'
 import Tooltip from '@/app/components/Tooltip'
 
@@ -22,6 +23,8 @@ interface Opportunity {
   focus_area: string | null
   region: string | null
   audience_match: string | null
+  audience_research_notes?: string | null
+  event_health?: 'growing' | 'stable' | 'declining' | 'unknown' | null
   recommendation: string
   description: string | null
   past_sponsors: string | null
@@ -38,6 +41,15 @@ interface Opportunity {
   competitor_name?: string | null
   review_notes?: string | null
   dna_notes?: string | null
+  approver_name?: string | null
+  approver_email?: string | null
+  approval_sent_at?: string | null
+  approval_thread_id?: string | null
+  last_followup_at?: string | null
+  followup_count?: number | null
+  contact_name?: string | null
+  contact_email?: string | null
+  budget_research_notes?: string | null
 }
 
 function fmt(n: number) {
@@ -130,6 +142,7 @@ function PriorityBar({ score }: { score: number }) {
 }
 
 export default function OpportunitiesPage() {
+  const { data: session } = useSession()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
@@ -169,11 +182,55 @@ export default function OpportunitiesPage() {
   const [reviewNotesDraft, setReviewNotesDraft] = useState<Record<number, string>>({})
   const [savedNotes, setSavedNotes] = useState<Record<number, boolean>>({})
 
+  // Decline modal (return to pipeline)
+  const [declineModalOpp, setDeclineModalOpp] = useState<Opportunity | null>(null)
+  const [declineReason, setDeclineReason] = useState('')
+
   // Do Not Attend modal
   const [dnaModal, setDnaModal] = useState<{ opp: Opportunity } | null>(null)
   const [dnaDraft, setDnaDraft] = useState({ isCompetitor: false, competitorName: '', notes: '' })
   const [dnaEditingId, setDnaEditingId] = useState<number | null>(null)
   const [dnaEditDraft, setDnaEditDraft] = useState({ isCompetitor: false, competitorName: '', notes: '' })
+
+  // Approval email feature
+  const [approvers, setApprovers] = useState<{ id: number; name: string; email: string; title: string | null }[]>([])
+  const [approvalModal, setApprovalModal] = useState<{ opp: Opportunity } | null>(null)
+  const [selectedApproverId, setSelectedApproverId] = useState<number | ''>('')
+  const [manualApproverName, setManualApproverName] = useState('')
+  const [manualApproverEmail, setManualApproverEmail] = useState('')
+  const [emailDraft, setEmailDraft] = useState<{ subject: string; body: string } | null>(null)
+  const [emailDraftLoading, setEmailDraftLoading] = useState(false)
+  const [sendingApproval, setSendingApproval] = useState(false)
+  const [approvalSent, setApprovalSent] = useState(false)
+  const [showAddApprover, setShowAddApprover] = useState(false)
+  const [newApproverName, setNewApproverName] = useState('')
+  const [newApproverEmail, setNewApproverEmail] = useState('')
+  const [newApproverTitle, setNewApproverTitle] = useState('')
+  const [addingApprover, setAddingApprover] = useState(false)
+  const [followupModal, setFollowupModal] = useState<{ opp: Opportunity } | null>(null)
+  const [followupDraft, setFollowupDraft] = useState<{ subject: string; body: string } | null>(null)
+  const [followupDraftLoading, setFollowupDraftLoading] = useState(false)
+  const [sendingFollowup, setSendingFollowup] = useState(false)
+  const [followupSent, setFollowupSent] = useState(false)
+  const [gmailWarning, setGmailWarning] = useState<string | null>(null)
+
+  // Pricing estimate feature
+  type EstimateResult = {
+    estimated_low: number; estimated_high: number
+    line_items: Array<{ category: string; label: string; low: number; high: number; basis: string }>
+    confidence_note: string; similar_events_used: string[]
+  }
+  type RequestPricingResult = {
+    contact_found: boolean; contact_email: string | null; contact_name: string | null
+    gmail_configured: boolean; email_subject: string; email_body: string; error?: string
+  }
+  type DraftEdits = { to: string; toName: string; subject: string; body: string }
+  const [pricingModal, setPricingModal] = useState<{ opp: Opportunity } | null>(null)
+  const [estimateCache, setEstimateCache] = useState<Record<number, EstimateResult>>({})
+  const [estimatingSet, setEstimatingSet] = useState<Set<number>>(new Set())
+  const [requestPricingState, setRequestPricingState] = useState<Record<number, 'idle' | 'searching' | 'draft' | 'sending' | 'sent' | 'error'>>({})
+  const [requestPricingResult, setRequestPricingResult] = useState<Record<number, RequestPricingResult>>({})
+  const [draftEdits, setDraftEdits] = useState<Record<number, DraftEdits>>({})
 
   // Under Review filters
   const [urSearch, setUrSearch] = useState('')
@@ -344,8 +401,9 @@ export default function OpportunitiesPage() {
       fetch('/api/settings').then(r => r.json()),
       fetch('/api/opportunities/historical-matches').then(r => r.json()).catch(() => []),
       fetch('/api/opportunities/apify-scan').then(r => r.json()).catch(() => null),
+      fetch('/api/approvers').then(r => r.json()).catch(() => null),
     ])
-      .then(([data, status, settings, historical, apify]) => {
+      .then(([data, status, settings, historical, apify, approverData]) => {
         if (data.opportunities?.length) {
           setOpportunities(data.opportunities)
           setGeneratedAt(data.generated_at)
@@ -356,6 +414,7 @@ export default function OpportunitiesPage() {
         if (settings.opp_visible_filters) setVisibleFilters(settings.opp_visible_filters.split(',').filter(Boolean))
         if (Array.isArray(historical)) setHistoricalEvents(historical)
         if (apify) { setApifyConfigured(apify.configured); setApifyLastAdded(apify.last_added ?? null) }
+        if (approverData?.approvers) setApprovers(approverData.approvers)
       })
       .finally(() => setInitialLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -397,14 +456,256 @@ export default function OpportunitiesPage() {
     setTimeout(() => setToast(null), 4000)
   }
 
-  const removeFromReview = async (opp: Opportunity) => {
+  const removeFromReview = (opp: Opportunity) => {
+    setDeclineModalOpp(opp)
+    setDeclineReason('')
+  }
+
+  // Approval email helpers
+  const openApprovalModal = (opp: Opportunity) => {
+    setApprovalModal({ opp })
+    setSelectedApproverId('')
+    setManualApproverName('')
+    setManualApproverEmail('')
+    setEmailDraft(null)
+    setApprovalSent(false)
+    setGmailWarning(null)
+  }
+
+  const generateApprovalDraft = async (opp: Opportunity, approverName: string, approverEmail: string) => {
+    if (!approverEmail.trim()) return
+    setEmailDraftLoading(true)
+    setEmailDraft(null)
+    try {
+      const res = await fetch(`/api/opportunities/${opp.id}/send-approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approverEmail, approverName, generateOnly: true }),
+      })
+      const data = await res.json() as { subject?: string; body?: string; error?: string }
+      if (data.error) throw new Error(data.error)
+      setEmailDraft({ subject: data.subject || '', body: data.body || '' })
+    } catch (e) {
+      alert('Failed to generate email: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setEmailDraftLoading(false)
+    }
+  }
+
+  const sendApprovalEmail = async () => {
+    if (!approvalModal) return
+    const approver = selectedApproverId !== '' ? approvers.find(a => a.id === selectedApproverId) : null
+    const approverEmail = approver ? approver.email : manualApproverEmail.trim()
+    const approverName = approver ? approver.name : manualApproverName.trim()
+    if (!approverEmail) { alert('Please select or enter an approver email'); return }
+    if (!emailDraft) { alert('Please generate the email draft first'); return }
+    setSendingApproval(true)
+    try {
+      const res = await fetch(`/api/opportunities/${approvalModal.opp.id}/send-approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approverEmail, approverName, emailSubject: emailDraft.subject, emailBody: emailDraft.body }),
+      })
+      const data = await res.json() as { success?: boolean; gmailNotConfigured?: boolean; message?: string; error?: string }
+      if (data.error) throw new Error(data.error)
+      if (data.gmailNotConfigured) {
+        setGmailWarning(data.message || 'Gmail not configured')
+      } else {
+        setApprovalSent(true)
+        // Move to "waiting for approval" now that the approval email has been sent
+        setOpportunities(prev => prev.map(o => o.id === approvalModal.opp.id
+          ? { ...o, status: 'waiting_approval', approver_name: approverName, approver_email: approverEmail, approval_sent_at: new Date().toISOString() }
+          : o
+        ))
+        setTimeout(() => setApprovalModal(null), 3000)
+      }
+    } catch (e) {
+      alert('Failed to send: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSendingApproval(false)
+    }
+  }
+
+  const openFollowupModal = (opp: Opportunity) => {
+    setFollowupModal({ opp })
+    setFollowupDraft(null)
+    setFollowupSent(false)
+    setGmailWarning(null)
+    // Auto-generate draft on open
+    generateFollowupDraft(opp)
+  }
+
+  const generateFollowupDraft = async (opp: Opportunity) => {
+    setFollowupDraftLoading(true)
+    setFollowupDraft(null)
+    try {
+      const res = await fetch(`/api/opportunities/${opp.id}/send-followup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ generateOnly: true }),
+      })
+      const data = await res.json() as { subject?: string; body?: string; error?: string }
+      if (data.error) throw new Error(data.error)
+      setFollowupDraft({ subject: data.subject || '', body: data.body || '' })
+    } catch (e) {
+      alert('Failed to generate follow-up: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setFollowupDraftLoading(false)
+    }
+  }
+
+  const sendFollowupEmail = async () => {
+    if (!followupModal || !followupDraft) return
+    setSendingFollowup(true)
+    try {
+      const res = await fetch(`/api/opportunities/${followupModal.opp.id}/send-followup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailSubject: followupDraft.subject, emailBody: followupDraft.body }),
+      })
+      const data = await res.json() as { success?: boolean; gmailNotConfigured?: boolean; message?: string; error?: string }
+      if (data.error) throw new Error(data.error)
+      if (data.gmailNotConfigured) {
+        setGmailWarning(data.message || 'Gmail not configured')
+      } else {
+        setFollowupSent(true)
+        setOpportunities(prev => prev.map(o => o.id === followupModal.opp.id
+          ? { ...o, last_followup_at: new Date().toISOString(), followup_count: (o.followup_count || 0) + 1 }
+          : o
+        ))
+        setTimeout(() => setFollowupModal(null), 2000)
+      }
+    } catch (e) {
+      alert('Failed to send: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSendingFollowup(false)
+    }
+  }
+
+  const openPricingModal = (opp: Opportunity) => {
+    setPricingModal({ opp })
+    // Lazy-load estimate if not cached
+    if (opp.id && !estimateCache[opp.id] && !estimatingSet.has(opp.id)) {
+      setEstimatingSet(s => { const n = new Set(s); n.add(opp.id!); return n })
+      fetch(`/api/opportunities/${opp.id}/estimate-pricing`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) throw new Error(data.error)
+          setEstimateCache(c => ({ ...c, [opp.id!]: data }))
+          // Update card budget display if estimate is new
+          if (data.estimated_low || data.estimated_high) {
+            setOpportunities(prev => prev.map(o => o.id === opp.id ? {
+              ...o,
+              budget_estimate_low: o.budget_estimate_low ?? data.estimated_low,
+              budget_estimate_high: o.budget_estimate_high ?? data.estimated_high,
+            } : o))
+          }
+        })
+        .catch(() => {}) // Silent fail — modal shows "unavailable"
+        .finally(() => setEstimatingSet(s => { const n = new Set(s); n.delete(opp.id!); return n }))
+    }
+  }
+
+  const sendPricingRequest = (opp: Opportunity) => {
     if (!opp.id) return
+    setRequestPricingState(s => ({ ...s, [opp.id!]: 'searching' }))
+    fetch(`/api/opportunities/${opp.id}/request-pricing`, { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        setRequestPricingResult(r => ({ ...r, [opp.id!]: data }))
+        if (data.error) {
+          setRequestPricingState(s => ({ ...s, [opp.id!]: 'error' }))
+        } else {
+          // Pre-populate editable draft fields from AI result
+          setDraftEdits(d => ({
+            ...d,
+            [opp.id!]: {
+              to: data.contact_email ?? '',
+              toName: data.contact_name ?? '',
+              subject: data.email_subject ?? '',
+              body: data.email_body ?? '',
+            }
+          }))
+          setRequestPricingState(s => ({ ...s, [opp.id!]: 'draft' }))
+        }
+      })
+      .catch(e => {
+        setRequestPricingResult(r => ({ ...r, [opp.id!]: { contact_found: false, contact_email: null, contact_name: null, gmail_configured: false, email_subject: '', email_body: '', error: e.message } }))
+        setRequestPricingState(s => ({ ...s, [opp.id!]: 'error' }))
+      })
+  }
+
+  const confirmSendPricingEmail = (opp: Opportunity) => {
+    if (!opp.id) return
+    const edits = draftEdits[opp.id]
+    if (!edits) return
+    setRequestPricingState(s => ({ ...s, [opp.id!]: 'sending' }))
+    fetch(`/api/opportunities/${opp.id}/send-pricing-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: edits.to, toName: edits.toName || null, subject: edits.subject, emailBody: edits.body }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) {
+          setRequestPricingResult(r => ({ ...r, [opp.id!]: { ...r[opp.id!], error: data.error } }))
+          setRequestPricingState(s => ({ ...s, [opp.id!]: 'error' }))
+        } else {
+          setRequestPricingState(s => ({ ...s, [opp.id!]: 'sent' }))
+        }
+      })
+      .catch(e => {
+        setRequestPricingResult(r => ({ ...r, [opp.id!]: { ...r[opp.id!], error: e.message } }))
+        setRequestPricingState(s => ({ ...s, [opp.id!]: 'error' }))
+      })
+  }
+
+  const addApprover = async () => {
+    if (!newApproverName.trim() || !newApproverEmail.trim()) return
+    setAddingApprover(true)
+    try {
+      const res = await fetch('/api/approvers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newApproverName.trim(), email: newApproverEmail.trim(), title: newApproverTitle.trim() || undefined }),
+      })
+      const data = await res.json() as { approver?: { id: number; name: string; email: string; title: string | null }; error?: string }
+      if (data.error) throw new Error(data.error)
+      if (data.approver) {
+        setApprovers(prev => [...prev, data.approver!])
+        setSelectedApproverId(data.approver.id)
+        setNewApproverName(''); setNewApproverEmail(''); setNewApproverTitle('')
+        setShowAddApprover(false)
+      }
+    } catch (e) {
+      alert('Could not save approver: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setAddingApprover(false)
+    }
+  }
+
+  const markApproved = async (opp: Opportunity) => {
     await fetch(`/api/opportunities/${opp.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'pipeline' }),
+      body: JSON.stringify({ status: 'pending_approval' }),
     }).catch(() => {})
-    setOpportunities(prev => prev.map(o => o.id === opp.id ? { ...o, status: 'pipeline' } : o))
+    setOpportunities(prev => prev.map(o => o.id === opp.id ? { ...o, status: 'pending_approval' } : o))
+    setToast(`"${opp.name}" back in Under Review — confirm to add to Events`)
+    setTimeout(() => setToast(null), 4000)
+  }
+
+  const confirmRemoveFromReview = async (skipReason = false) => {
+    if (!declineModalOpp?.id) return
+    const reason = skipReason ? null : (declineReason.trim() || null)
+    await fetch(`/api/opportunities/${declineModalOpp.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'pipeline', review_notes: reason }),
+    }).catch(() => {})
+    setOpportunities(prev => prev.map(o => o.id === declineModalOpp.id ? { ...o, status: 'pipeline', review_notes: reason } : o))
+    setDeclineModalOpp(null)
+    setDeclineReason('')
   }
 
   const archiveOpp = async (opp: Opportunity) => {
@@ -594,8 +895,9 @@ export default function OpportunitiesPage() {
   }
 
   // Partition into tabs
-  const pipelineOpps = opportunities.filter(o => o.status !== 'pending_approval' && o.status !== 'do_not_attend' && o.status !== 'archived' && !o.added_to_events)
+  const pipelineOpps = opportunities.filter(o => o.status !== 'pending_approval' && o.status !== 'waiting_approval' && o.status !== 'do_not_attend' && o.status !== 'archived' && !o.added_to_events)
   const underReviewOpps = opportunities.filter(o => o.status === 'pending_approval') // raw — used for count badge
+  const waitingApprovalOpps = opportunities.filter(o => o.status === 'waiting_approval') // sent for approval, awaiting response
   const doNotAttendOpps = opportunities.filter(o => o.status === 'do_not_attend').sort((a, b) => a.name.localeCompare(b.name))
   const archivedOpps = opportunities.filter(o => o.status === 'archived').sort((a, b) => a.name.localeCompare(b.name))
 
@@ -637,12 +939,12 @@ export default function OpportunitiesPage() {
 
   // Derive the quarter+year combos that actually exist in the data, e.g. "Q2-2026"
   const QUARTER_MONTH_LABELS: Record<string, string> = { Q1: 'Jan–Mar', Q2: 'Apr–Jun', Q3: 'Jul–Sep', Q4: 'Oct–Dec' }
-  const urAvailableQuarters = [...new Set(
+  const urAvailableQuarters = Array.from(new Set(
     underReviewOpps.map(o => {
       const q = getQuarter(o.start_date); const y = o.start_date?.slice(0, 4)
       return q && y ? `${q}-${y}` : null
     }).filter(Boolean)
-  )].sort() as string[]
+  )).sort() as string[]
 
   // Filtered + sorted Under Review list
   const FIT_ORDER: Record<string, number> = { High: 0, Medium: 1, Low: 2 }
@@ -1087,6 +1389,248 @@ export default function OpportunitiesPage() {
         </div>
       )}
 
+      {/* ── Pricing Details Modal ── */}
+      {pricingModal && (() => {
+        const opp = pricingModal.opp
+        const estimate = estimateCache[opp.id!] ?? null
+        const isEstimating = estimatingSet.has(opp.id!)
+        const reqState = requestPricingState[opp.id!] ?? 'idle'
+        const reqResult = requestPricingResult[opp.id!] ?? null
+        const isUnderReview = opp.status === 'pending_approval' || opp.status === 'waiting_approval'
+
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setPricingModal(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="bg-gray-800 px-6 py-4 flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <svg className="w-5 h-5 text-white flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                  <div>
+                    <div className="text-white font-semibold text-sm">Pricing Details</div>
+                    <div className="text-white/70 text-xs mt-0.5 truncate max-w-xs">{opp.name}</div>
+                  </div>
+                </div>
+                <button onClick={() => setPricingModal(null)} className="text-white/60 hover:text-white transition-colors">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto space-y-4">
+                {/* Estimate-only disclaimer — always shown */}
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                  <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <p className="text-xs text-amber-700 leading-relaxed">
+                    <strong>Estimated pricing only.</strong> These figures are based on industry standards and your company&apos;s historical event data. Actual pricing will vary — use &quot;Request Actual Pricing&quot; below for confirmed numbers.
+                  </p>
+                </div>
+
+                {/* Loading state */}
+                {isEstimating && (
+                  <div className="text-center py-6">
+                    <svg className="w-8 h-8 text-gray-300 animate-spin mx-auto mb-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                    <div className="text-sm text-gray-500">Generating estimate…</div>
+                    <div className="text-xs text-gray-400 mt-1">Calibrating against your event history</div>
+                  </div>
+                )}
+
+                {/* Estimate results */}
+                {!isEstimating && estimate && (
+                  <div className="space-y-3">
+                    {/* Total range */}
+                    <div className="bg-gray-50 rounded-xl p-4">
+                      <div className="text-xs font-medium text-gray-500 mb-1">Estimated Total Investment</div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {fmt(estimate.estimated_low)} – {fmt(estimate.estimated_high)}
+                      </div>
+                    </div>
+                    {/* Line items */}
+                    <div className="space-y-2">
+                      {estimate.line_items.map((item, i) => (
+                        <div key={i} className="flex items-start justify-between gap-3 py-2 border-b border-gray-100 last:border-0">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-gray-800">{item.label}</div>
+                            <div className="text-xs text-gray-400 mt-0.5 leading-relaxed">{item.basis}</div>
+                          </div>
+                          <div className="text-sm font-semibold text-gray-700 whitespace-nowrap flex-shrink-0">
+                            {fmt(item.low)} – {fmt(item.high)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Confidence note */}
+                    {estimate.confidence_note && (
+                      <p className="text-xs text-gray-400 leading-relaxed pt-1">{estimate.confidence_note}</p>
+                    )}
+                    {estimate.similar_events_used?.length > 0 && (
+                      <p className="text-xs text-gray-400">Calibrated using: {estimate.similar_events_used.join(', ')}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* No estimate available */}
+                {!isEstimating && !estimate && (
+                  <div className="text-center py-4 text-gray-400 text-sm">Unable to generate estimate at this time.</div>
+                )}
+
+                {/* Under Review only: Request Actual Pricing section */}
+                {isUnderReview && (
+                  <div className="border-t border-gray-100 pt-4 space-y-3">
+                    <div className="text-sm font-semibold text-gray-700">Request Actual Pricing</div>
+
+                    {/* Not signed in — prompt to connect Gmail */}
+                    {!session && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-gray-500 leading-relaxed">
+                          Sign in with your Google account to send pricing inquiries directly from your own Gmail.
+                        </p>
+                        <button
+                          onClick={() => signIn('google')}
+                          className="w-full flex items-center justify-center gap-2 border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                          </svg>
+                          Sign in with Google
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Idle — prompt to start */}
+                    {session && reqState === 'idle' && (
+                      <>
+                        <p className="text-xs text-gray-500 leading-relaxed">
+                          The AI will find the sponsorship contact and draft an inquiry email. You can review and edit before sending.
+                        </p>
+                        <button
+                          onClick={() => sendPricingRequest(opp)}
+                          className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                          Draft Pricing Inquiry
+                        </button>
+                      </>
+                    )}
+
+                    {/* Searching — AI working */}
+                    {reqState === 'searching' && (
+                      <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+                        <svg className="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                        <div>
+                          <div className="text-sm font-medium text-blue-800">Finding contact &amp; drafting email…</div>
+                          <div className="text-xs text-blue-600 mt-0.5">Searching for sponsorship contact info</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Draft — editable form before sending */}
+                    {reqState === 'draft' && opp.id && draftEdits[opp.id] && (
+                      <div className="space-y-3">
+                        <p className="text-xs text-gray-500">Review and edit the email below, then hit Send.</p>
+                        <div className="space-y-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">To (email)</label>
+                            <input
+                              type="email"
+                              value={draftEdits[opp.id!].to}
+                              onChange={e => setDraftEdits(d => ({ ...d, [opp.id!]: { ...d[opp.id!], to: e.target.value } }))}
+                              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                              placeholder="contact@event.com"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Contact name (optional)</label>
+                            <input
+                              type="text"
+                              value={draftEdits[opp.id!].toName}
+                              onChange={e => setDraftEdits(d => ({ ...d, [opp.id!]: { ...d[opp.id!], toName: e.target.value } }))}
+                              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                              placeholder="Jane Smith"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Subject</label>
+                            <input
+                              type="text"
+                              value={draftEdits[opp.id!].subject}
+                              onChange={e => setDraftEdits(d => ({ ...d, [opp.id!]: { ...d[opp.id!], subject: e.target.value } }))}
+                              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Message</label>
+                            <textarea
+                              value={draftEdits[opp.id!].body}
+                              onChange={e => setDraftEdits(d => ({ ...d, [opp.id!]: { ...d[opp.id!], body: e.target.value } }))}
+                              rows={10}
+                              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                            />
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => confirmSendPricingEmail(opp)}
+                          disabled={!draftEdits[opp.id!].to}
+                          className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                          Send Email
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Sending — in flight */}
+                    {reqState === 'sending' && (
+                      <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+                        <svg className="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                        <div className="text-sm font-medium text-blue-800">Sending…</div>
+                      </div>
+                    )}
+
+                    {/* Sent — success */}
+                    {reqState === 'sent' && opp.id && draftEdits[opp.id] && (
+                      <div className="flex items-start gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+                        <svg className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                        <div>
+                          <div className="text-sm font-semibold text-green-800">Email sent!</div>
+                          <div className="text-xs text-green-700 mt-0.5">
+                            Sent to {draftEdits[opp.id!].toName ? `${draftEdits[opp.id!].toName} (${draftEdits[opp.id!].to})` : draftEdits[opp.id!].to}
+                          </div>
+                          <div className="text-xs text-green-600 mt-1">A copy is in your Gmail Sent folder.</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Error state */}
+                    {reqState === 'error' && (
+                      <div className="space-y-2">
+                        <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                          <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                          <div className="text-sm text-red-700">{reqResult?.error || 'Something went wrong. Please try again.'}</div>
+                        </div>
+                        <button
+                          onClick={() => setRequestPricingState(s => ({ ...s, [opp.id!]: 'idle' }))}
+                          className="w-full border border-gray-200 text-gray-600 hover:bg-gray-50 py-2 rounded-xl text-xs transition-colors"
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0">
+                <button onClick={() => setPricingModal(null)} className="w-full border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-xl text-sm transition-colors">
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div>
@@ -1371,7 +1915,7 @@ export default function OpportunitiesPage() {
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
           Under Review
-          <span className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${pageTab === 'under_review' ? 'bg-amber-100 text-amber-700' : 'bg-gray-200 text-gray-500'}`}>{underReviewOpps.length}</span>
+          <span className={`text-xs rounded-full px-1.5 py-0.5 font-medium ${pageTab === 'under_review' ? 'bg-amber-100 text-amber-700' : 'bg-gray-200 text-gray-500'}`}>{underReviewOpps.length + waitingApprovalOpps.length}</span>
           <Tooltip text="Shortlisted opportunities you're actively evaluating — not yet committed as events." icon position="bottom" />
         </button>
         <button
@@ -1765,6 +2309,18 @@ export default function OpportunitiesPage() {
                     <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 text-center font-medium">
                       ⏳ Under Review
                     </div>
+                    <button onClick={() => openPricingModal(opp)}
+                      className="flex items-center justify-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 px-3 py-2 rounded-lg text-xs font-medium transition-colors">
+                      <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                      View Pricing Details
+                    </button>
+                    <button
+                      onClick={() => openApprovalModal(opp)}
+                      className="flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                      Send for Approval
+                    </button>
                     <button
                       onClick={() => setConfirmEventOpp(opp)}
                       disabled={adding[opp.id!]}
@@ -1782,13 +2338,105 @@ export default function OpportunitiesPage() {
                       className="flex items-center justify-center gap-1.5 bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
-                      Undo
+                      Return to Pipeline
                     </button>
                   </div>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── WAITING FOR APPROVAL SECTION (within under_review tab) ───────── */}
+      {pageTab === 'under_review' && waitingApprovalOpps.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="h-px flex-1 bg-gray-200" />
+            <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-4 py-1.5">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Waiting for Approval ({waitingApprovalOpps.length})
+            </div>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 mb-5 flex items-start gap-3">
+            <svg className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            <div>
+              <p className="text-sm font-semibold text-blue-800">Approval requests sent</p>
+              <p className="text-xs text-blue-700 mt-0.5">These events are waiting on budget approval. Send a follow-up, confirm once approved, or return to the pipeline if declined.</p>
+            </div>
+          </div>
+          <div className="space-y-4">
+            {waitingApprovalOpps.map(opp => {
+              const sentDays = opp.approval_sent_at
+                ? Math.round((Date.now() - new Date(opp.approval_sent_at).getTime()) / 86400000)
+                : null
+              const followupDays = opp.last_followup_at
+                ? Math.round((Date.now() - new Date(opp.last_followup_at).getTime()) / 86400000)
+                : null
+              return (
+                <div key={opp.id} className="bg-white border border-blue-200 rounded-xl p-5 flex gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start gap-3 flex-wrap mb-2">
+                      <h3 className="text-base font-bold text-gray-900">{opp.name}</h3>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-medium">⏳ Awaiting Approval</span>
+                      {opp.relevant_for === 'ignitetech' && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200 font-medium">IgniteTech</span>}
+                      {opp.relevant_for === 'khoros' && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-medium">Khoros</span>}
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-xs text-gray-500 mb-3">
+                      {opp.start_date && <span>📅 {new Date(opp.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+                      {opp.location && <span>📍 {opp.location}</span>}
+                      {(opp.budget_estimate_low || opp.budget_estimate_high) && (
+                        <span>💰 {opp.budget_estimate_low && opp.budget_estimate_high ? `${fmt(opp.budget_estimate_low)} – ${fmt(opp.budget_estimate_high)}` : fmt(opp.budget_estimate_high || opp.budget_estimate_low || 0)}</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-4 text-xs mt-2">
+                      {opp.approver_name && (
+                        <span className="text-gray-600">
+                          <span className="font-medium text-gray-700">Sent to:</span> {opp.approver_name}
+                          {opp.approver_email && <span className="text-gray-400"> ({opp.approver_email})</span>}
+                        </span>
+                      )}
+                      {sentDays !== null && (
+                        <span className={`font-medium ${sentDays >= 7 ? 'text-orange-600' : 'text-gray-500'}`}>
+                          {sentDays === 0 ? 'Sent today' : `Sent ${sentDays}d ago`}
+                        </span>
+                      )}
+                      {opp.followup_count && opp.followup_count > 0 && (
+                        <span className="text-gray-400">
+                          {opp.followup_count} follow-up draft{opp.followup_count > 1 ? 's' : ''} saved
+                          {followupDays !== null && followupDays === 0 ? ' today' : followupDays !== null ? ` (last ${followupDays}d ago)` : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 flex-shrink-0 w-36">
+                    <button
+                      onClick={() => openFollowupModal(opp)}
+                      className="flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                      Follow Up
+                    </button>
+                    <button
+                      onClick={() => markApproved(opp)}
+                      className="flex items-center justify-center gap-1.5 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                      Approved ✓
+                    </button>
+                    <button
+                      onClick={() => removeFromReview(opp)}
+                      className="flex items-center justify-center gap-1.5 bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+                      Not Approved
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -2513,11 +3161,16 @@ export default function OpportunitiesPage() {
                                 <strong>Why 2026:</strong> {opp.why_now}
                               </div>
                             )}
+                            {opp.audience_research_notes && (
+                              <div className="text-xs bg-indigo-50 text-indigo-800 rounded-lg px-3 py-2 border border-indigo-100">
+                                <strong>Audience research:</strong> {opp.audience_research_notes}
+                              </div>
+                            )}
                           </div>
                         )}
 
                         {/* Expand/collapse toggle */}
-                        {(opp.past_sponsors || opp.networking_value || opp.why_now) && (
+                        {(opp.past_sponsors || opp.networking_value || opp.why_now || opp.audience_research_notes) && (
                           <button
                             onClick={() => setExpandedId(isExpanded ? null : (opp.id || i))}
                             className="mt-2 text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1"
@@ -2574,6 +3227,15 @@ export default function OpportunitiesPage() {
                           </>
                         ) : (
                           <>
+                            <button onClick={() => openPricingModal(opp)}
+                              className="w-full flex items-center justify-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 px-3 py-2 rounded-lg text-xs font-medium transition-colors">
+                              {estimatingSet.has(opp.id!) ? (
+                                <svg className="w-3.5 h-3.5 animate-spin text-gray-400" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                              ) : (
+                                <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                              )}
+                              View Estimated Pricing
+                            </button>
                             <button onClick={() => moveToReview(opp)} disabled={adding[opp.id!]}
                               className="w-full flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-xs font-semibold">
                               {adding[opp.id!] ? (
@@ -2604,6 +3266,310 @@ export default function OpportunitiesPage() {
         <div className="py-16 text-center text-gray-400">
           <p className="font-medium">No opportunities match your current filters</p>
           <p className="text-sm mt-1">Try clearing some filters or running a new search above</p>
+        </div>
+      )}
+
+      {/* ── Approval Email Modal ── */}
+      {approvalModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setApprovalModal(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="bg-blue-700 px-6 py-4 flex items-center justify-between gap-3 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <svg className="w-5 h-5 text-white flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                <div>
+                  <div className="text-white font-semibold text-sm">Send for Approval</div>
+                  <div className="text-blue-200 text-xs mt-0.5 truncate max-w-xs">{approvalModal.opp.name}</div>
+                </div>
+              </div>
+              <button onClick={() => setApprovalModal(null)} className="text-white/70 hover:text-white transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Approver selector */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-2">Send to</label>
+                {approvers.length > 0 ? (
+                  <div className="space-y-2">
+                    <select
+                      value={selectedApproverId}
+                      onChange={e => {
+                        const val = e.target.value === '' ? '' : parseInt(e.target.value)
+                        setSelectedApproverId(val as number | '')
+                        setManualApproverName(''); setManualApproverEmail('')
+                      }}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+                    >
+                      <option value="">— Select an approver —</option>
+                      {approvers.map(a => (
+                        <option key={a.id} value={a.id}>{a.name}{a.title ? ` · ${a.title}` : ''} ({a.email})</option>
+                      ))}
+                      <option value="">✏️ Enter manually</option>
+                    </select>
+                    {selectedApproverId === '' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <input value={manualApproverName} onChange={e => setManualApproverName(e.target.value)} placeholder="Name" className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                        <input value={manualApproverEmail} onChange={e => setManualApproverEmail(e.target.value)} placeholder="Email address" type="email" className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <input value={manualApproverName} onChange={e => setManualApproverName(e.target.value)} placeholder="Approver name" className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                    <input value={manualApproverEmail} onChange={e => setManualApproverEmail(e.target.value)} placeholder="Approver email" type="email" className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                  </div>
+                )}
+
+                {/* Save as approver toggle */}
+                {!showAddApprover && (selectedApproverId === '' && (manualApproverName || manualApproverEmail)) && (
+                  <button onClick={() => { setShowAddApprover(true); setNewApproverName(manualApproverName); setNewApproverEmail(manualApproverEmail) }}
+                    className="mt-2 text-xs text-blue-600 hover:text-blue-800 underline underline-offset-2">
+                    Save this person as an approver for next time
+                  </button>
+                )}
+                {showAddApprover && (
+                  <div className="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+                    <p className="text-xs font-semibold text-blue-800">Save as approver</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <input value={newApproverName} onChange={e => setNewApproverName(e.target.value)} placeholder="Name" className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white" />
+                      <input value={newApproverEmail} onChange={e => setNewApproverEmail(e.target.value)} placeholder="Email" type="email" className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white" />
+                      <input value={newApproverTitle} onChange={e => setNewApproverTitle(e.target.value)} placeholder="Title (optional)" className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white" />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={addApprover} disabled={addingApprover || !newApproverName || !newApproverEmail}
+                        className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                        {addingApprover ? 'Saving…' : 'Save Approver'}
+                      </button>
+                      <button onClick={() => setShowAddApprover(false)} className="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5">Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Generate email button */}
+              {!emailDraft && !emailDraftLoading && (
+                <button
+                  onClick={() => {
+                    const approver = selectedApproverId !== '' ? approvers.find(a => a.id === selectedApproverId) : null
+                    const email = approver ? approver.email : manualApproverEmail.trim()
+                    const name = approver ? approver.name : manualApproverName.trim()
+                    generateApprovalDraft(approvalModal.opp, name, email)
+                  }}
+                  disabled={selectedApproverId === '' && !manualApproverEmail.trim()}
+                  className="w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                  Generate Approval Email with AI
+                </button>
+              )}
+
+              {/* Loading state */}
+              {emailDraftLoading && (
+                <div className="flex items-center justify-center gap-3 py-8 text-sm text-gray-500">
+                  <svg className="w-5 h-5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  Drafting your approval request…
+                </div>
+              )}
+
+              {/* Email draft editor */}
+              {emailDraft && !approvalSent && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Subject</label>
+                    <input
+                      value={emailDraft.subject}
+                      onChange={e => setEmailDraft(d => d ? { ...d, subject: e.target.value } : null)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-gray-700">Email body</label>
+                      <button
+                        onClick={() => {
+                          const approver = selectedApproverId !== '' ? approvers.find(a => a.id === selectedApproverId) : null
+                          generateApprovalDraft(approvalModal.opp, approver ? approver.name : manualApproverName, approver ? approver.email : manualApproverEmail)
+                        }}
+                        className="text-xs text-blue-600 hover:text-blue-800 underline underline-offset-2">
+                        Regenerate
+                      </button>
+                    </div>
+                    <textarea
+                      value={emailDraft.body}
+                      onChange={e => setEmailDraft(d => d ? { ...d, body: e.target.value } : null)}
+                      rows={12}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none font-mono text-gray-700 bg-gray-50"
+                    />
+                  </div>
+
+                  {/* Gmail warning */}
+                  {gmailWarning && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      <p className="text-xs font-semibold text-amber-800 mb-1">Gmail not connected</p>
+                      <p className="text-xs text-amber-700 mb-1">{gmailWarning}</p>
+                      <p className="text-xs text-amber-600">Copy the email above and paste it into Gmail when you&apos;re ready to send.</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={sendApprovalEmail}
+                    disabled={sendingApproval}
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-3 rounded-xl text-sm font-semibold transition-colors"
+                  >
+                    {sendingApproval ? (
+                      <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Saving to Gmail Drafts…</>
+                    ) : (
+                      <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg> Send Email</>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Success state */}
+              {approvalSent && (
+                <div className="text-center py-8">
+                  <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                  </div>
+                  <p className="text-base font-bold text-gray-900 mb-1">Approval email sent!</p>
+                  <p className="text-sm text-gray-500 mb-1">Open Gmail, review the draft, and hit Send when ready.</p>
+                  <p className="text-xs text-gray-400">This event is now in your Waiting for Approval queue.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Follow-up Email Modal ── */}
+      {followupModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setFollowupModal(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="bg-blue-700 px-6 py-4 flex items-center justify-between gap-3 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <svg className="w-5 h-5 text-white flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                <div>
+                  <div className="text-white font-semibold text-sm">Send Follow-up</div>
+                  <div className="text-blue-200 text-xs mt-0.5 truncate max-w-xs">{followupModal.opp.name}</div>
+                </div>
+              </div>
+              <button onClick={() => setFollowupModal(null)} className="text-white/70 hover:text-white transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* Approver info */}
+              {followupModal.opp.approver_name && (
+                <div className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+                  <span className="font-medium text-gray-700">Sending to:</span>{' '}
+                  {followupModal.opp.approver_name}
+                  {followupModal.opp.approver_email && <span className="text-gray-400"> ({followupModal.opp.approver_email})</span>}
+                </div>
+              )}
+
+              {followupDraftLoading && (
+                <div className="flex items-center justify-center gap-3 py-10 text-sm text-gray-500">
+                  <svg className="w-5 h-5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  Drafting follow-up…
+                </div>
+              )}
+
+              {followupDraft && !followupSent && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Subject</label>
+                    <input value={followupDraft.subject} onChange={e => setFollowupDraft(d => d ? { ...d, subject: e.target.value } : null)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-gray-700">Email body</label>
+                      <button onClick={() => generateFollowupDraft(followupModal.opp)} className="text-xs text-blue-600 hover:text-blue-800 underline underline-offset-2">Regenerate</button>
+                    </div>
+                    <textarea value={followupDraft.body} onChange={e => setFollowupDraft(d => d ? { ...d, body: e.target.value } : null)}
+                      rows={10}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none font-mono text-gray-700 bg-gray-50" />
+                  </div>
+
+                  {gmailWarning && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      <p className="text-xs font-semibold text-amber-800 mb-1">Gmail not connected</p>
+                      <p className="text-xs text-amber-700 mb-1">{gmailWarning}</p>
+                      <p className="text-xs text-amber-600">Copy the email above and paste it into Gmail when you&apos;re ready to send.</p>
+                    </div>
+                  )}
+
+                  <button onClick={sendFollowupEmail} disabled={sendingFollowup}
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-3 rounded-xl text-sm font-semibold transition-colors">
+                    {sendingFollowup ? (
+                      <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Saving to Gmail Drafts…</>
+                    ) : (
+                      <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg> Send Follow-up</>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {followupSent && (
+                <div className="text-center py-8">
+                  <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                  </div>
+                  <p className="text-base font-bold text-gray-900 mb-1">Follow-up sent!</p>
+                  <p className="text-sm text-gray-500">Open Gmail, review it, and hit Send when ready.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Return to Pipeline (Decline) Modal ── */}
+      {declineModalOpp && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setDeclineModalOpp(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="bg-gray-700 px-6 py-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <svg className="w-5 h-5 text-white flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                <div>
+                  <div className="text-white font-semibold text-sm">Return to Pipeline</div>
+                  <div className="text-white/80 text-xs mt-0.5 truncate max-w-xs">{declineModalOpp.name}</div>
+                </div>
+              </div>
+              <button onClick={() => setDeclineModalOpp(null)} className="text-white/70 hover:text-white transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600 leading-relaxed">
+                Why isn&apos;t <span className="font-medium text-gray-800">{declineModalOpp.name}</span> ready to approve?
+              </p>
+              <textarea
+                rows={3}
+                placeholder="e.g. Budget too high, timing not right..."
+                value={declineReason}
+                onChange={e => setDeclineReason(e.target.value)}
+                className="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-300 resize-none leading-relaxed"
+              />
+              <p className="text-xs text-gray-400">Optional — saved reasons help the AI learn what to avoid in future scans.</p>
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => confirmRemoveFromReview()}
+                  className="flex-1 bg-gray-700 hover:bg-gray-800 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors"
+                >
+                  Save &amp; Return
+                </button>
+                <button
+                  onClick={() => confirmRemoveFromReview(true)}
+                  className="px-5 bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 text-sm font-medium py-2.5 rounded-xl transition-colors"
+                >
+                  Skip &amp; Return
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

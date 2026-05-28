@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getDb } from '@/lib/db'
 
-const client = new Anthropic()
+const client = new Anthropic({ apiKey: process.env.APP_ANTHROPIC_API_KEY })
 
 function getSettings() {
   const db = getDb()
@@ -142,6 +142,35 @@ export async function POST(req: NextRequest) {
       ).join('\n')}\n`
     : ''
 
+  // Fetch approved/attended opportunities as positive signals
+  const approvedSignals = (db.prepare(`
+    SELECT name, type, location, focus_area, region, description, priority_score
+    FROM opportunities
+    WHERE (status = 'pending_approval' OR added_to_events = 1)
+    ORDER BY priority_score DESC, updated_at DESC
+    LIMIT 15
+  `).all() as Array<{ name: string; type: string | null; location: string | null; focus_area: string | null; region: string | null; description: string | null; priority_score: number | null }>)
+
+  const approvedBlock = approvedSignals.length > 0
+    ? `\nAPPROVED EVENTS — find more like these:\n${approvedSignals.map(a =>
+        `- ${a.name} (${a.type || 'conference'}${a.location ? `, ${a.location}` : ''}${a.focus_area ? `, focus: ${a.focus_area}` : ''})`
+      ).join('\n')}\n`
+    : ''
+
+  // Fetch pipeline decline reasons
+  const declinedFromReview = (db.prepare(`
+    SELECT name, type, location, review_notes
+    FROM opportunities
+    WHERE status = 'pipeline' AND review_notes IS NOT NULL AND review_notes != ''
+    ORDER BY updated_at DESC LIMIT 10
+  `).all() as Array<{ name: string; type: string | null; location: string | null; review_notes: string }>)
+
+  const declineBlock = declinedFromReview.length > 0
+    ? `\nRETURNED TO PIPELINE — why they weren't approved (use to calibrate scoring):\n${declinedFromReview.map(d =>
+        `- "${d.name}"${d.location ? ` (${d.location})` : ''}: ${d.review_notes}`
+      ).join('\n')}\n`
+    : ''
+
   const prompt = `You are analyzing tweets to extract B2B event opportunities for a company.
 
 Company context: ${companyName || 'a B2B software company'}
@@ -151,7 +180,7 @@ Regions: ${regions.join(', ') || 'global'}
 
 Already-known events (do not duplicate):
 ${existingNames.slice(0, 50).join(', ')}
-${dnaBlock}
+${dnaBlock}${declineBlock}${approvedBlock}
 Tweets:
 ${tweetText}
 

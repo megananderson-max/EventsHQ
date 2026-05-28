@@ -748,6 +748,51 @@ export default function OutcomesTab({ eventId, event }: OutcomesTabProps) {
         </div>
       </div>
 
+      {/* Learning callout — peer benchmark comparison */}
+      {peerBenchmark && peerBenchmark.event_count >= 2 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <span className="text-lg leading-none mt-0.5">💡</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-900 mb-1">
+                Learning from past events
+              </p>
+              <p className="text-xs text-amber-700 mb-3">
+                Based on {peerBenchmark.event_count} similar {peerBenchmark.event_type.replace(/_/g, ' ')} events:
+                {peerBenchmark.avg_leads != null && <> avg <span className="font-semibold">{Math.round(peerBenchmark.avg_leads).toLocaleString()} leads</span></>}
+                {peerBenchmark.avg_meetings != null && <>, <span className="font-semibold">{Math.round(peerBenchmark.avg_meetings).toLocaleString()} meetings</span></>}
+                {peerBenchmark.avg_roi != null && <>, <span className="font-semibold">{Math.round(peerBenchmark.avg_roi)}% ROI</span></>}
+                {peerBenchmark.avg_cost_per_lead != null && <>, <span className="font-semibold">{formatCurrency(peerBenchmark.avg_cost_per_lead)} cost/lead</span></>}
+              </p>
+              {outcomes ? (
+                <div className="flex flex-wrap gap-3">
+                  {peerBenchmark.avg_leads != null && outcomes.leads_captured != null && (
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${outcomes.leads_captured >= peerBenchmark.avg_leads ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {outcomes.leads_captured >= peerBenchmark.avg_leads ? '↑' : '↓'} Leads: {outcomes.leads_captured >= peerBenchmark.avg_leads ? 'Above average' : 'Below average'}
+                    </span>
+                  )}
+                  {peerBenchmark.avg_meetings != null && outcomes.meetings_booked != null && (
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${outcomes.meetings_booked >= peerBenchmark.avg_meetings ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {outcomes.meetings_booked >= peerBenchmark.avg_meetings ? '↑' : '↓'} Meetings: {outcomes.meetings_booked >= peerBenchmark.avg_meetings ? 'Above average' : 'Below average'}
+                    </span>
+                  )}
+                  {peerBenchmark.avg_roi != null && roi != null && (
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${roi >= peerBenchmark.avg_roi ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {roi >= peerBenchmark.avg_roi ? '↑' : '↓'} ROI: {roi >= peerBenchmark.avg_roi ? 'Above average' : 'Below average'}
+                    </span>
+                  )}
+                  {!(outcomes.leads_captured != null || outcomes.meetings_booked != null || roi != null) && (
+                    <span className="text-xs text-amber-600 italic">Fill in your outcomes above to see how you compare.</span>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-amber-600 italic">Fill in your outcomes above to see how you compare against these targets.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Industry Benchmark */}
       <BenchmarkCard
         benchmark={benchmark}

@@ -72,7 +72,7 @@ function fmt(d: string | null) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-export default function ExecutionTab({ eventId }: { eventId: string }) {
+export default function ExecutionTab({ eventId, initialNotes }: { eventId: string; initialNotes?: string | null }) {
   const [tasksOpen, setTasksOpen] = useState(true)
   const [rosOpen, setROSOpen] = useState(true)
   const [staffOpen, setStaffOpen] = useState(true)
@@ -88,6 +88,7 @@ export default function ExecutionTab({ eventId }: { eventId: string }) {
       <CollapsibleSection title="Staffing" open={staffOpen} onToggle={() => setStaffOpen(o => !o)}>
         <StaffSection eventId={eventId} />
       </CollapsibleSection>
+      <EventDayNotesSection eventId={eventId} initialNotes={initialNotes} />
     </div>
   )
 }
@@ -626,6 +627,54 @@ function StaffSection({ eventId }: { eventId: string }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ---- Event Day Notes Section ----
+function EventDayNotesSection({ eventId, initialNotes }: { eventId: string; initialNotes?: string | null }) {
+  const [notes, setNotes] = useState(initialNotes || '')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const save = async () => {
+    setSaving(true)
+    setSaved(false)
+    await fetch(`/api/events/${eventId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ execution_notes: notes }),
+    })
+    setSaving(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100">
+        <h2 className="font-semibold text-gray-900">Event Day Notes</h2>
+        <p className="text-sm text-gray-500 mt-0.5">Capture what worked, what didn&apos;t, and key lessons for future events</p>
+      </div>
+      <div className="p-6">
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          rows={6}
+          placeholder="e.g. AV setup ran 30 min late — arrive earlier next time. Catering was excellent. Registration queue peaked at 9:15am — add a second check-in station for events over 300 people."
+          className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-gray-800 placeholder-gray-400"
+        />
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
+          >
+            {saving ? 'Saving...' : 'Save Notes'}
+          </button>
+          {saved && <span className="text-sm text-green-600 font-medium">Saved</span>}
+        </div>
+      </div>
     </div>
   )
 }

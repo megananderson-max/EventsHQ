@@ -18,6 +18,7 @@ export interface Event {
   opportunity_id?: number | null
   review_notes?: string | null
   post_event_completed?: number | null
+  execution_notes?: string | null
 }
 
 export const EVENT_TYPE_LABELS: Record<string, string> = {

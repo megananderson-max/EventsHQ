@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ToolUnion } from '@anthropic-ai/sdk/resources/messages/messages'
 import { getDb } from '@/lib/db'
 
-const client = new Anthropic()
+function getClient() { return new Anthropic({ apiKey: process.env.APP_ANTHROPIC_API_KEY }) }
 
 export async function GET() {
   const db = getDb()
@@ -75,6 +75,46 @@ ${dnaSignals.map(d =>
 ).join('\n')}
 
 Apply these signals to filter out similar events from your results. If a reason mentions "too expensive", de-prioritize high-cost events in that category. If a reason mentions "wrong audience", avoid events with similar attendee profiles. If a reason mentions a specific organizer, avoid other events by that organizer.
+` : ''
+
+    // Fetch pipeline decline reasons to teach the AI why events were returned from review
+    const declinedFromReview = db.prepare(`
+      SELECT name, type, location, review_notes
+      FROM opportunities
+      WHERE status = 'pipeline' AND review_notes IS NOT NULL AND review_notes != ''
+      ORDER BY updated_at DESC LIMIT 10
+    `).all() as Array<{ name: string; type: string | null; location: string | null; review_notes: string }>
+
+    const declineSection = declinedFromReview.length > 0 ? `
+═══════════════════════════════════════════════════
+RETURNED TO PIPELINE — why they weren't approved:
+═══════════════════════════════════════════════════
+These events were reviewed but returned to the pipeline. Use the stated reasons to calibrate scoring — avoid suggesting events with similar issues:
+
+${declinedFromReview.map(d =>
+  `- "${d.name}"${d.type ? ` [${d.type}]` : ''}${d.location ? ` — ${d.location}` : ''}\n  Reason: ${d.review_notes}`
+).join('\n')}
+` : ''
+
+    // Fetch approved/attended opportunities as positive signals
+    const approvedSignals = db.prepare(`
+      SELECT name, type, location, focus_area, region, description, priority_score
+      FROM opportunities
+      WHERE (status = 'pending_approval' OR added_to_events = 1)
+      ORDER BY priority_score DESC, updated_at DESC
+      LIMIT 15
+    `).all() as Array<{ name: string; type: string | null; location: string | null; focus_area: string | null; region: string | null; description: string | null; priority_score: number | null }>
+
+    const approvedSection = approvedSignals.length > 0 ? `
+═══════════════════════════════════════════════════
+APPROVED EVENTS — find more like these:
+═══════════════════════════════════════════════════
+The user has approved or added the following events to their calendar. Use these as positive signals — prioritize events with similar profiles, formats, audiences, and focus areas:
+
+${approvedSignals.map(a =>
+  `- ${a.name} (${a.type || 'conference'}${a.location ? `, ${a.location}` : ''}${a.focus_area ? `, focus: ${a.focus_area}` : ''})`
+).join('\n')}
+
 ` : ''
 
     const now = new Date().toISOString()
@@ -259,7 +299,7 @@ ${existingList}
 
 ALSO DO NOT DUPLICATE THESE EVENTS ALREADY IN OPPORTUNITIES DATABASE:
 ${existingOppNamesArr.map(n => `- ${n}`).join('\n') || 'None'}
-${dnaSection}
+${dnaSection}${declineSection}${approvedSection}
 ═══════════════════════════════════════════════════
 YOUR TASK
 ═══════════════════════════════════════════════════
@@ -295,7 +335,9 @@ Return a JSON array ONLY (no other text, no markdown, just the raw array):
     "focus_area": "Customer Experience",
     "region": "North America",
     "relevant_for": "null or a string describing which part of the company this is relevant for (e.g. 'corporate brand', 'product sales', 'both') — tailor to the configured company context",
-    "audience_match": "2-3 focused sentences explaining which job titles attend and why this event fits the company's target customer profile and goals.",
+    "audience_match": "ICP FIT ANALYSIS — required format: (1) Who actually attends: list specific job titles and company types found during research. (2) ICP match verdict: 'Strong match' / 'Partial match' / 'Weak match' — with a 1-sentence explanation of why. E.g. 'Strong match: 40% VP/Director-level CX and contact center leaders at F500 companies, verified from 2025 sponsor deck and LinkedIn attendee posts.' Never use generic inference — only cite what you found.",
+    "audience_research_notes": "Multi-channel research summary: what you found on each channel (website, X/Twitter, LinkedIn, Instagram, YouTube, press), which sources had the strongest audience signal, what was missing or inactive. Include any attendee counts or demographic % breakdowns you found. Note if a direct competitor sponsors this event — that confirms ICP alignment.",
+    "event_health": "growing | stable | declining | unknown — based on cross-channel signals: attendance trend, social engagement recency, sponsor list growth/shrinkage, press coverage volume",
     "recommendation": "Sponsor | Evaluate | Speak — never use Attend",
     "description": "3-4 sentences: what this event is and what business outcome attending/sponsoring drives for the configured company",
     "past_sponsors": "List 5-8 relevant past sponsors from the company's competitive landscape",
@@ -309,20 +351,93 @@ Return a JSON array ONLY (no other text, no markdown, just the raw array):
 priority_score (0-100): ${userCompany
       ? `audience quality vs. ${userCompany} target customer profile (35%) + reach/scale of event (20%) + competitive battleground importance (20%)${userSpeaker ? ` + ${userSpeaker} speaking/leadership opportunity (15%) + cost efficiency (10%)` : ' + cost efficiency (20%)'}`
       : 'audience quality vs. target customer profile (35%) + reach/scale of event (20%) + competitive battleground importance (20%) + executive speaking/leadership opportunity (15%) + cost efficiency (10%)'}.
+
+═══════════════════════════════════════════════════
+AUDIENCE RESEARCH REQUIREMENT — COMPREHENSIVE MULTI-CHANNEL
+═══════════════════════════════════════════════════
+For EVERY event you identify, you MUST research the actual audience across ALL of the following channels before finalising audience_match and priority_score. Generic assumptions are not acceptable. Scrape every available source:
+
+── OFFICIAL EVENT SOURCES ──
+1. FETCH the event website (web_fetch): speaker lineup (job titles/companies reveal the audience), "Who attends" / "Attendee profile" / "Sponsors" pages, published demographics, registration numbers, past event recap pages
+2. FETCH the event's sponsor/exhibitor prospectus if linked — these always contain verified attendee demographics and seniority breakdowns
+3. SEARCH for the event's official blog or press releases: "[event name] press release 2025 attendance"
+
+── X / TWITTER ──
+4. SEARCH: "[event name] 2025 twitter" and "[event hashtag] OR #[eventname]" — find tweets from actual attendees, live-tweeted sessions, post-event reactions. Job titles in bios, company names in tweets, and photo descriptions reveal real audience composition. Check if the official event account is active.
+5. FETCH the event's official Twitter/X profile page if known (e.g. twitter.com/eventname) — check follower count, posting recency, engagement levels
+
+── LINKEDIN ──
+6. SEARCH: "[event name] attended" OR "[event name] 2025 LinkedIn" — find real attendee posts with job titles
+7. SEARCH: "[event name] sponsor" OR "[event name] speaking" on LinkedIn — find companies that have posted about sponsoring or speaking, which reveals who targets this audience
+8. FETCH the event's LinkedIn company page if it exists — check follower count, post engagement, recent activity
+
+── INSTAGRAM ──
+9. SEARCH: "[event name] instagram" OR "[event hashtag] instagram" — event photo galleries show crowd size, booth setups, and audience demographics. Look for tagged posts from attendees with titles in bios.
+10. FETCH the event's Instagram profile if identifiable — check post frequency, follower count, engagement on recent posts
+
+── YOUTUBE & VIDEO ──
+11. SEARCH: "[event name] 2025 recap" OR "[event name] keynote 2025" OR "[event name] session recording" on YouTube — session videos reveal actual speaker caliber, audience Q&A interactions, and attendance hall sizes
+12. Look for conference highlight reels — these show exhibitor booths, networking areas, and crowd size
+13. FETCH individual session URLs if found — speaker bios and company affiliations verify audience profile
+
+── PODCASTS & AUDIO ──
+14. SEARCH: "[event name] podcast" OR "[event name] mentioned podcast" — industry podcasts frequently recap major events and interview speakers/attendees. Podcast guest bios reveal audience seniority.
+15. SEARCH: "site:buzzsprout.com OR site:anchor.fm OR site:spotify.com [event name]" — find episode mentions
+
+── PRESS & MEDIA COVERAGE ──
+16. SEARCH: "[event name] 2025 TechCrunch" OR "[event name] 2025 VentureBeat" OR "[event name] 2025 Forbes" — press coverage includes attendance figures, notable company presence, and growth/decline signals
+17. SEARCH: "[event name] 2025 recap highlights" — industry blog recaps often name-drop companies and executives who attended
+
+── REDDIT & COMMUNITY FORUMS ──
+18. SEARCH: "[event name] reddit" OR "site:reddit.com [event name]" — candid attendee reviews reveal whether events over-promise and under-deliver, whether it's worth the cost, and who actually shows up
+19. Check relevant subreddits (r/CustomerExperience, r/AIApplications, r/SaaS, r/marketing, etc.) for honest attendee feedback
+
+── PAST SPONSOR SIGNALS ──
+20. For each past sponsor you identify, SEARCH "[sponsor company] events 2025" or check their press releases — companies that repeatedly sponsor an event confirm its value for reaching a specific audience. If a direct Khoros/IgniteTech competitor sponsors it, that's a strong signal.
+
+Based on ALL of the above research, apply this three-step process:
+
+STEP A — DOCUMENT: Set audience_match and audience_research_notes from real findings across all channels above.
+
+STEP B — COMPARE AGAINST ICP: Explicitly cross-reference what you found against the target customer profile configured above (or the default Khoros ICP: VP/Head of Community, VP Customer Experience, CCO, VP Customer Service, Director of Customer Care, Contact Center VP/Director, Head of Social Media, Chief Digital Officer — at enterprise companies 1,000+ employees in financial services, retail, telecom, technology, healthcare, media).
+
+Ask these questions for each event:
+  • What % of the audience are decision-makers at VP level or above?
+  • What % are at enterprise companies (1,000+ employees)?
+  • Do the companies represented match the target verticals?
+  • Are there attendees who directly buy or influence the purchase of customer engagement, community, contact center, or social media management software?
+  • Do any direct competitors (Sprinklr, Genesys, Zendesk, Higher Logic, Sprout Social, NICE, Verint, Salesforce) already sponsor this event — confirming ICP presence?
+
+STEP C — APPLY TO SCORING: Use your answers from Step B to set:
+  • strategic_fit: "High" only if 30%+ of audience are genuine ICP matches at decision-maker level. "Medium" if audience is adjacent or partially aligned. "Low" if the audience is mostly practitioners, developers, or wrong verticals.
+  • priority_score: The audience quality component (35% of score) must reflect the ICP match found in Step B — not assumed. A large event with a weak ICP match should score lower than a smaller event with near-perfect ICP alignment.
+  • recommendation: "Sponsor" only for High strategic_fit with verified ICP density. "Speak" if ICP is present but sponsorship ROI is unclear. "Evaluate" for partial matches or unverified audiences.
+
+STEP D — HEALTH SIGNALS: Set event_health based on cross-channel signals:
+  • "growing" — increasing attendance, sold-out reports, new venue upgrades, active across multiple channels, growing sponsor list
+  • "stable" — consistent attendance, regular posting, steady engagement
+  • "declining" — shrinking attendance, sparse social activity, stale website (last updated 2023 or earlier), no recent press, few recent attendee posts
+  • "unknown" — couldn't find reliable signals (note this clearly)
+  SIGNIFICANTLY LOWER the priority_score for declining events even if ICP match is strong.
+
+If a channel has no presence (no Instagram, no YouTube), note that in audience_research_notes — it signals limited reach.
+
 Sort by priority_score descending.`
 
-    const message = await client.messages.create({
+    const message = await getClient().messages.create({
       model: 'claude-opus-4-5',
       max_tokens: 16000,
       tools: [
-        { type: 'web_search_20250305', name: 'web_search' } as ToolUnion
+        { type: 'web_search_20250305', name: 'web_search' } as ToolUnion,
+        { type: 'web_fetch_20250910', name: 'web_fetch' } as ToolUnion,
       ],
       messages: [{ role: 'user', content: prompt }]
     })
 
-    // Extract text from response — may contain ServerToolUseBlock + WebSearchToolResultBlock + TextBlock
-    const textBlock = message.content.find(b => b.type === 'text') as { type: 'text'; text: string } | undefined
-    if (!textBlock) throw new Error('No text response from AI')
+    // Collect ALL text blocks — model emits text between tool calls; JSON is always in the LAST block
+    const allTextBlocks = message.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[]
+    if (allTextBlocks.length === 0) throw new Error('No text response from AI')
+    const textBlock = allTextBlocks[allTextBlocks.length - 1]
 
     let rawOpportunities: Record<string, unknown>[]
     try {
@@ -344,8 +459,8 @@ Sort by priority_score descending.`
         strategic_fit, audience_match, recommendation, description,
         organizer, website, past_sponsors, priority_score,
         speaking_opportunity, networking_value, focus_area, region, why_now,
-        relevant_for, status, generated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pipeline', ?)
+        relevant_for, audience_research_notes, event_health, status, generated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pipeline', ?)
       ON CONFLICT(name) DO UPDATE SET
         start_date=excluded.start_date, end_date=excluded.end_date,
         location=excluded.location, venue=excluded.venue,
@@ -360,6 +475,8 @@ Sort by priority_score descending.`
         networking_value=excluded.networking_value,
         focus_area=excluded.focus_area, region=excluded.region,
         why_now=excluded.why_now,
+        audience_research_notes=excluded.audience_research_notes,
+        event_health=excluded.event_health,
         relevant_for=CASE WHEN excluded.relevant_for='ignitetech' THEN 'ignitetech' ELSE COALESCE(opportunities.relevant_for, excluded.relevant_for) END,
         generated_at=excluded.generated_at
     `)
@@ -381,6 +498,8 @@ Sort by priority_score descending.`
           opp.speaking_opportunity || null, opp.networking_value || null,
           opp.focus_area || null, opp.region || null, opp.why_now || null,
           opp.relevant_for || null,
+          opp.audience_research_notes || null,
+          opp.event_health || 'unknown',
           now
         )
         added++

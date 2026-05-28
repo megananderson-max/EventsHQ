@@ -108,9 +108,9 @@ export default function EventsPage() {
     setHideComplete(localStorage.getItem('eventsHideComplete') === '1')
   }, [])
 
-  const availableYears = [...new Set(
+  const availableYears = Array.from(new Set(
     events.map(e => e.start_date ? e.start_date.slice(0, 4) : null).filter(Boolean)
-  )].sort() as string[]
+  )).sort() as string[]
 
   const sorted = [...events]
     .filter(e => !yearFilter || (e.start_date || '').startsWith(yearFilter))

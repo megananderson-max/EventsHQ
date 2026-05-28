@@ -8,9 +8,10 @@ import VendorsTab from './VendorsTab'
 import BudgetTab from './BudgetTab'
 import PlanningTab from './PlanningTab'
 import OutcomesTab from './OutcomesTab'
+import ExecutionTab from './ExecutionTab'
 import { Event, EventStatusBadge, EVENT_TYPE_LABELS } from './types'
 
-const TABS = ['Overview', 'Task List', 'Vendors', 'Budget', 'Outcomes'] as const
+const TABS = ['Overview', 'Task List', 'Vendors', 'Budget', 'Outcomes', 'Execution'] as const
 type Tab = typeof TABS[number]
 
 interface AISetupResult {
@@ -406,11 +407,12 @@ export default function EventDetailPage() {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'Overview' && <OverviewTab event={event} onUpdate={fetchEvent} onTabChange={setActiveTab} />}
+      {activeTab === 'Overview' && <OverviewTab event={event} onUpdate={fetchEvent} onTabChange={(tab) => setActiveTab(tab as Parameters<typeof setActiveTab>[0])} />}
       {activeTab === 'Task List' && <PlanningTab eventId={id} />}
       {activeTab === 'Vendors' && <VendorsTab eventId={id} />}
       {activeTab === 'Budget' && <BudgetTab eventId={id} budgetTotal={event.budget_total} />}
       {activeTab === 'Outcomes' && <OutcomesTab eventId={id} event={event} />}
+      {activeTab === 'Execution' && <ExecutionTab eventId={id} initialNotes={event.execution_notes} />}
     </div>
   )
 }

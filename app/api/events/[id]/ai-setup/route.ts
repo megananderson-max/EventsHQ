@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ToolUnion } from '@anthropic-ai/sdk/resources/messages/messages'
 import { getDb } from '@/lib/db'
 
-const client = new Anthropic()
+const client = new Anthropic({ apiKey: process.env.APP_ANTHROPIC_API_KEY })
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -235,7 +235,8 @@ If the uploaded content includes post-event reports, attendance figures, survey 
     if (needsGeneration) {
       // Build a compact research summary from any tool_result blocks in the first response
       const toolResults = researchMessage.content
-        .filter(b => b.type === 'tool_result')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter(b => (b as any).type === 'tool_result' || b.type === 'tool_use')
         .map(b => JSON.stringify(b).slice(0, 2000))
         .join('\n---\n')
         .slice(0, 8000)

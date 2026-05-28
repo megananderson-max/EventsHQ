@@ -171,8 +171,8 @@ export default function PlanningPage() {
   }
   const groups = Array.from(groupMap.values())
 
-  const eventOptions = [...new Map(items.map(i => [i.event_id, i.event_name])).entries()]
-  const assigneeOptions = [...new Set(items.filter(i => i.assigned_to).map(i => i.assigned_to!))]
+  const eventOptions = Array.from(new Map(items.map(i => [i.event_id, i.event_name])).entries())
+  const assigneeOptions = Array.from(new Set(items.filter(i => i.assigned_to).map(i => i.assigned_to!)))
 
   const stats = STATUS_OPTIONS.map(s => ({ ...s, count: items.filter(i => (i.status || 'todo') === s.value).length }))
 

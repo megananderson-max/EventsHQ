@@ -113,6 +113,16 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
   const [undoItem, setUndoItem] = useState<BudgetItem | null>(null)
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Research Actual Pricing
+  const [researchingPricing, setResearchingPricing] = useState(false)
+  const [pricingResult, setPricingResult] = useState<{
+    found: boolean; confidence: string; budget_low: number|null; budget_high: number|null;
+    source_url: string|null; source_name: string|null; pricing_details: string;
+    email_draft: {subject:string;body:string}|null; summary: string; gmailDraftCreated?:boolean
+  }|null>(null)
+  const [pricingResultExpanded, setPricingResultExpanded] = useState(false)
+  const [emailCopied, setEmailCopied] = useState(false)
+
   // Change 4: editable contingency
   const contingencySettingKey = `event_contingency_${eventId}`
   const [contingencyAmount, setContingencyAmount] = useState<number>(DEFAULT_CONTINGENCY)
@@ -312,6 +322,33 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
     }
   }
 
+  const researchPricing = async () => {
+    setResearchingPricing(true)
+    setPricingResult(null)
+    setPricingResultExpanded(true)
+    try {
+      const res = await fetch(`/api/events/${eventId}/research-budget`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Research failed')
+      setPricingResult(data)
+    } catch (e: unknown) {
+      setPricingResult({
+        found: false,
+        confidence: 'not_found',
+        budget_low: null,
+        budget_high: null,
+        source_url: null,
+        source_name: null,
+        pricing_details: '',
+        email_draft: null,
+        summary: e instanceof Error ? e.message : 'Research failed',
+        gmailDraftCreated: false,
+      })
+    } finally {
+      setResearchingPricing(false)
+    }
+  }
+
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   // Split into confirmed and estimated, then group each by category
@@ -456,6 +493,24 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
               </button>
             )}
             <button
+              onClick={researchPricing}
+              disabled={researchingPricing}
+              className="flex items-center gap-1.5 text-emerald-600 hover:text-emerald-800 border border-emerald-200 hover:border-emerald-400 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+              title="Search the web for real sponsorship and exhibitor pricing for this event"
+            >
+              {researchingPricing ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  Researching… (~30s)
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                  Research Actual Pricing
+                </>
+              )}
+            </button>
+            <button
               onClick={runAiBudget}
               disabled={aiLoading}
               className="flex items-center gap-1.5 text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-400 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
@@ -480,6 +535,98 @@ export default function BudgetTab({ eventId, budgetTotal }: { eventId: string; b
         </div>
         {aiError && (
           <div className="mx-6 mt-3 mb-1 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{aiError}</div>
+        )}
+
+        {/* Research Pricing inline result card */}
+        {(researchingPricing || pricingResult) && pricingResultExpanded && (
+          <div className={`mx-6 mt-3 mb-1 rounded-xl border overflow-hidden ${researchingPricing ? 'border-emerald-200 bg-emerald-50' : pricingResult?.found ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-opacity-50"
+              style={{ borderColor: researchingPricing ? '#6ee7b7' : pricingResult?.found ? '#86efac' : '#fcd34d' }}>
+              <div className="flex items-center gap-2">
+                {researchingPricing ? (
+                  <svg className="w-4 h-4 text-emerald-600 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                ) : pricingResult?.found ? (
+                  <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                ) : (
+                  <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                )}
+                <span className={`text-sm font-semibold ${researchingPricing ? 'text-emerald-800' : pricingResult?.found ? 'text-green-800' : 'text-amber-800'}`}>
+                  {researchingPricing ? 'Searching the web for pricing…' : pricingResult?.found ? 'Pricing Found' : "Couldn't find public pricing"}
+                </span>
+                {!researchingPricing && pricingResult?.confidence && pricingResult.found && (
+                  <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-medium capitalize">{pricingResult.confidence}</span>
+                )}
+              </div>
+              <button onClick={() => setPricingResultExpanded(false)} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            {!researchingPricing && pricingResult && (
+              <div className="px-4 py-3 space-y-2">
+                {pricingResult.found && (
+                  <>
+                    {(pricingResult.budget_low || pricingResult.budget_high) && (
+                      <div className="text-lg font-bold text-green-900">
+                        {pricingResult.budget_low && pricingResult.budget_high
+                          ? `${new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(pricingResult.budget_low)} – ${new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(pricingResult.budget_high)}`
+                          : new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(pricingResult.budget_high || pricingResult.budget_low || 0)}
+                      </div>
+                    )}
+                    {pricingResult.pricing_details && (
+                      <p className="text-sm text-green-800 leading-relaxed">{pricingResult.pricing_details}</p>
+                    )}
+                    {pricingResult.source_url && (
+                      <a href={pricingResult.source_url} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-green-600 hover:text-green-800 hover:underline font-medium">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                        {pricingResult.source_name || 'Source'}
+                      </a>
+                    )}
+                    <p className="text-xs text-green-600 italic">Budget not auto-updated — add line items manually based on these figures.</p>
+                  </>
+                )}
+                {!pricingResult.found && (
+                  <>
+                    {pricingResult.summary && <p className="text-sm text-amber-700 leading-relaxed">{pricingResult.summary}</p>}
+                    {pricingResult.email_draft && (
+                      <div className="space-y-2 mt-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold text-gray-700">Draft email to organizer</p>
+                          {pricingResult.gmailDraftCreated && (
+                            <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                              Draft saved to Gmail — open Gmail to send
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500">Subject: <span className="text-gray-800 font-medium">{pricingResult.email_draft.subject}</span></div>
+                        <textarea
+                          readOnly
+                          value={pricingResult.email_draft.body}
+                          rows={6}
+                          className="w-full text-xs text-gray-700 bg-white border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none font-mono leading-relaxed"
+                        />
+                        <button
+                          onClick={() => {
+                            if (pricingResult.email_draft) {
+                              navigator.clipboard.writeText(`Subject: ${pricingResult.email_draft.subject}\n\n${pricingResult.email_draft.body}`)
+                              setEmailCopied(true)
+                              setTimeout(() => setEmailCopied(false), 2000)
+                            }
+                          }}
+                          className="flex items-center gap-1.5 border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+                          {emailCopied ? 'Copied!' : 'Copy Email'}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {loading ? (

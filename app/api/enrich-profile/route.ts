@@ -2,59 +2,67 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import type { ToolUnion } from '@anthropic-ai/sdk/resources/messages/messages'
 
-const client = new Anthropic()
+const client = new Anthropic({ apiKey: process.env.APP_ANTHROPIC_API_KEY })
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { websiteUrl, linkedinUrl, additionalUrls } = body as {
+    const { websiteUrl, companyNameHint } = body as {
       websiteUrl: string
-      linkedinUrl?: string
-      additionalUrls?: string[]
+      companyNameHint?: string
     }
 
     if (!websiteUrl?.trim()) {
       return NextResponse.json({ success: false, error: 'websiteUrl is required' }, { status: 400 })
     }
 
-    const extraUrls = [
-      linkedinUrl?.trim(),
-      ...(additionalUrls ?? []).map(u => u.trim()),
-    ].filter(Boolean) as string[]
+    const nameHintLine = companyNameHint?.trim()
+      ? `The company name may be "${companyNameHint.trim()}" — use this as a search hint if needed.`
+      : ''
 
-    const extraSteps = extraUrls.length
-      ? extraUrls.map((u, i) => `${i + 2}. Fetch this additional page: ${u}`).join('\n')
-      : '2. Skip (no additional pages provided)'
-    const finalStep = extraUrls.length + 2
+    const prompt = `You are a company research assistant. Your job is to build a rich company profile from a single website URL — you must discover everything else yourself automatically.
 
-    const prompt = `You are a company research assistant. Your job is to build a company profile by fetching web pages.
+WEBSITE: ${websiteUrl}
+${nameHintLine}
 
-Follow these steps in order:
-1. Fetch the company website: ${websiteUrl}
-${extraSteps}
-${finalStep}. If you need more context (e.g. about their industry or leadership), run one targeted web search.
+RESEARCH STEPS — execute ALL of the following using your web_fetch and web_search tools:
 
-After gathering information, return ONLY a JSON object (no markdown fences, no other text) with these fields:
+STEP 1 — Fetch the main website
+  • Fetch ${websiteUrl} and read the homepage.
+  • Look for links to About, Team, or Leadership pages and fetch those too.
+
+STEP 2 — Auto-discover social profiles (do not ask the user — find them yourself)
+  • Search: "${companyNameHint || websiteUrl} LinkedIn company page" → fetch the result
+  • Search: "${companyNameHint || websiteUrl} Twitter OR X" → fetch the result
+  • Search: "${companyNameHint || websiteUrl} Crunchbase" → fetch the result if found
+  • These reveal audience type, industry, employee count, and funding stage.
+
+STEP 3 — Identify the executive speaker
+  • From the About/Team page or LinkedIn, find the CEO, founder, or most prominent public-facing executive.
+
+STEP 4 — Build the profile
+  • Combine everything found. Be specific about the target customer — not "enterprises" but "VP/Director of Customer Experience at B2B companies with 500+ employees".
+  • Set social_profiles_found = true if you successfully fetched a LinkedIn OR Twitter/X page for this company; false if you only had the main website.
+
+Return ONLY a JSON object (no markdown fences, no other text):
 
 {
   "company_name": "Official company name",
-  "company_description": "2-3 sentence description of what the company does, who their customers are, and their market position",
-  "focus_areas": ["array of matching values from: community, cx, social, executive, technology, marketing, sales — pick the most relevant ones, max 3"],
-  "regions": ["array of matching values from: north_america, latin_america, europe, united_kingdom, middle_east, africa, apac, southeast_asia, global — based on where they operate"],
-  "speaker_name": "Name of the CEO, founder, or most prominent executive speaker if findable, otherwise null",
-  "website_url": "${websiteUrl}"
+  "company_description": "2-3 sentences: what they do, who their specific customers are (role + company size), and market position",
+  "focus_areas": ["values from this exact list only: community, cx, social, executive, technology, marketing, sales — max 3"],
+  "regions": ["values from this exact list only: north_america, latin_america, europe, united_kingdom, middle_east, africa, apac, southeast_asia, global"],
+  "speaker_name": "CEO or founder name if confidently identified, otherwise null",
+  "website_url": "${websiteUrl}",
+  "social_profiles_found": true
 }
 
 Rules:
-- focus_areas must only contain values from this exact list: community, cx, social, executive, technology, marketing, sales
-- regions must only contain values from this exact list: north_america, latin_america, europe, united_kingdom, middle_east, africa, apac, southeast_asia, global
-- If the company appears global, include "global" in regions
-- speaker_name should be null if you cannot confidently identify a named executive
-- Output ONLY the raw JSON object — no markdown, no explanation`
+- focus_areas: only values from the exact list above
+- regions: only values from the exact list above; include "global" if they operate worldwide
+- speaker_name: null if not confidently identified
+- social_profiles_found: true if you fetched at least one LinkedIn or Twitter/X profile; false otherwise
+- Output ONLY the raw JSON — no markdown, no explanation`
 
-    // Use web_fetch and web_search tools (same pattern as ai-setup route).
-    // These are server-side tools handled by Anthropic infrastructure; the SDK
-    // executes up to 3 agentic iterations and returns the final end_turn response.
     const response = await client.messages.create({
       model: 'claude-opus-4-5',
       max_tokens: 4000,
@@ -65,15 +73,12 @@ Rules:
       messages: [{ role: 'user', content: prompt }],
     })
 
-    // Grab all text blocks; the JSON is in the last one
     const textBlocks = response.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[]
     if (textBlocks.length === 0) {
       return NextResponse.json({ success: false, error: 'No text response from AI' }, { status: 500 })
     }
 
     const rawText = textBlocks[textBlocks.length - 1].text.trim()
-
-    // Strip markdown fences if present
     const stripped = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
     const jsonStart = stripped.indexOf('{')
     const jsonEnd = stripped.lastIndexOf('}') + 1
@@ -88,6 +93,7 @@ Rules:
       regions: string[]
       speaker_name: string | null
       website_url: string
+      social_profiles_found: boolean
     }
 
     return NextResponse.json({ success: true, profile })

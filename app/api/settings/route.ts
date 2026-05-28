@@ -55,8 +55,22 @@ export async function PUT(req: NextRequest) {
   }
 
   for (const [key, value] of Object.entries(rest)) {
+    // Skip nav_order / nav_hidden — those don't affect documentation content
+    if (key === 'nav_order' || key === 'nav_hidden') {
+      stmt.run(key, String(value ?? ''))
+      continue
+    }
     stmt.run(key, String(value ?? ''))
   }
+
+  // Trigger background workflow-docs regeneration whenever meaningful settings change
+  // (fire-and-forget — don't await, don't fail the settings save if this errors)
+  const baseUrl = req.headers.get('origin') || `http://localhost:${process.env.PORT || 3000}`
+  fetch(`${baseUrl}/api/workflow-docs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ trigger: 'settings_saved' }),
+  }).catch(() => {})
 
   return NextResponse.json({ ok: true })
 }

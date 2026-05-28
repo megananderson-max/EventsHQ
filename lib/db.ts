@@ -185,6 +185,32 @@ function initSchema(db: Database.Database) {
   try { db.exec(`ALTER TABLE opportunities ADD COLUMN competitor_name TEXT`) } catch {}
   // Migrate: add company_profiles JSON column to app_settings
   try { db.exec("ALTER TABLE app_settings ADD COLUMN company_profiles TEXT") } catch {}
+  // Migrate: add execution_notes to events for event-day lessons learned
+  try { db.exec(`ALTER TABLE events ADD COLUMN execution_notes TEXT`) } catch {}
+  // Migrate: audience research enrichment fields on opportunities
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN audience_research_notes TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN event_health TEXT`) } catch {}
+
+  // Workflow documentation — AI-generated, cached in DB
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workflow_docs (
+      id INTEGER PRIMARY KEY,
+      content TEXT NOT NULL,
+      generated_at TEXT NOT NULL,
+      trigger TEXT DEFAULT 'manual'
+    )
+  `)
+
+  // Per-user Gmail OAuth tokens
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_tokens (
+      email TEXT PRIMARY KEY,
+      name TEXT,
+      image TEXT,
+      gmail_refresh_token TEXT,
+      updated_at DATETIME DEFAULT (datetime('now'))
+    )
+  `)
   // Migrate: add role column to team_members
   try { db.exec(`ALTER TABLE team_members ADD COLUMN role TEXT DEFAULT 'user'`) } catch {}
   // Migrate: add first_name + last_name to team_members (older DBs)
@@ -232,6 +258,28 @@ function initSchema(db: Database.Database) {
   // Migrate: add computed outcome metrics
   try { db.exec(`ALTER TABLE event_outcomes ADD COLUMN cost_per_lead REAL`) } catch {}
   try { db.exec(`ALTER TABLE event_outcomes ADD COLUMN roi REAL`) } catch {}
+
+  // Approvers table — saved list of people who can approve event spend
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS approvers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      title TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `)
+
+  // Migrate: approval workflow columns on opportunities
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN approver_name TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN approver_email TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN approval_sent_at TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN approval_thread_id TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN last_followup_at TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN followup_count INTEGER DEFAULT 0`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN contact_name TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN contact_email TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN budget_research_notes TEXT`) } catch {}
 
   // Check-ins table — recreate with UNIQUE constraint to prevent duplicate rows
   // Drop and recreate to fix any duplicate rows created before the constraint existed

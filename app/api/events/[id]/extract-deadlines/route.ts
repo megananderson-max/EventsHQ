@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ToolUnion } from '@anthropic-ai/sdk/resources/messages/messages'
 import { getDb } from '@/lib/db'
 
-const client = new Anthropic()
+const client = new Anthropic({ apiKey: process.env.APP_ANTHROPIC_API_KEY })
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {

@@ -54,6 +54,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       sets.push('post_event_completed = ?')
       values.push(body.post_event_completed ? 1 : 0)
     }
+    if (body.execution_notes !== undefined) {
+      sets.push('execution_notes = ?')
+      values.push(body.execution_notes || null)
+    }
     if (sets.length === 0) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
     values.push(params.id)
     db.prepare(`UPDATE events SET ${sets.join(', ')} WHERE id = ?`).run(...values)

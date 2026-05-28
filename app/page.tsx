@@ -626,7 +626,7 @@ function QuarterSnapshot({ events, opportunities, loading }: { events: Event[]; 
                 {qData.map(q => {
                   const numVal = row.key === 'budgetConfirmed' ? q.budgetConfirmed
                     : row.key === 'budgetPending' ? q.budgetPending
-                    : (q as Record<string, number>)[row.key]
+                    : (q as unknown as Record<string, number>)[row.key]
                   const isEmpty = numVal === 0
                   const display = row.format === 'currency'
                     ? (numVal > 0 ? formatCurrency(numVal) : '—')
