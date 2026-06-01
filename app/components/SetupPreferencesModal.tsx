@@ -68,11 +68,16 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
   const [hasExistingPrefs, setHasExistingPrefs] = useState(false)
 
   // ── Company setup step ─────────────────────────────────────────────────
-  const [companyNameInput, setCompanyNameInput] = useState('')
-  const [websiteInput, setWebsiteInput]         = useState('')
+  // Supports multiple companies from the start
+  const [companyInputs, setCompanyInputs] = useState([{ name: '', url: '' }])
   const [enrichLoading, setEnrichLoading]       = useState(false)
   const [enrichError, setEnrichError]           = useState<string | null>(null)
   const [enrichedFrom, setEnrichedFrom]         = useState<string | null>(null)
+
+  const updateCompanyInput = (i: number, field: 'name' | 'url', value: string) =>
+    setCompanyInputs(prev => prev.map((c, j) => j === i ? { ...c, [field]: value } : c))
+  const addCompanyInput = () => setCompanyInputs(prev => [...prev, { name: '', url: '' }])
+  const removeCompanyInput = (i: number) => setCompanyInputs(prev => prev.filter((_, j) => j !== i))
 
   // ── Social prompt step ─────────────────────────────────────────────────
   // Shown only when AI couldn't find social profiles on its own
@@ -172,68 +177,72 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
 
   // ── AI enrichment ───────────────────────────────────────────────────────
   const runEnrich = async () => {
-    if (!websiteInput.trim()) return
+    const validInputs = companyInputs.filter(c => c.url.trim())
+    if (validInputs.length === 0) { setEnrichError('Please enter at least one company website URL'); return }
     setEnrichLoading(true)
     setEnrichError(null)
     try {
-      const res = await fetch('/api/enrich-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          websiteUrl: websiteInput.trim(),
-          companyNameHint: companyNameInput.trim() || undefined,
-        }),
-      })
-      const data = await res.json() as {
-        success: boolean
-        error?: string
+      type ProfileData = {
+        success: boolean; error?: string
         profile?: {
-          company_name?: string
-          company_description?: string
-          focus_areas?: string[]
-          regions?: string[]
-          speaker_name?: string | null
-          website_url?: string
+          company_name?: string; company_description?: string
+          focus_areas?: string[]; regions?: string[]
+          speaker_name?: string | null; website_url?: string
           social_profiles_found?: boolean
         }
       }
-      if (!res.ok || !data.success) throw new Error(data.error || 'Could not research company — please try again')
-      const p = data.profile!
 
-      const enrichedName      = p.company_name || companyNameInput.trim() || websiteInput.trim()
-      const extractedProfile  = p.company_description || ''
-      const extractedFocusAreas = Array.isArray(p.focus_areas) ? p.focus_areas.filter(v => VALID_FOCUS_AREAS.includes(v)) : []
-      const extractedRegions    = Array.isArray(p.regions) ? p.regions.filter(v => VALID_REGIONS.includes(v)) : []
-      const extractedSpeakerName = p.speaker_name || ''
-      const socialFound = p.social_profiles_found !== false // default true if field absent
+      // Research each company in parallel
+      const results = await Promise.all(
+        validInputs.map(c =>
+          fetch('/api/enrich-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ websiteUrl: c.url.trim(), companyNameHint: c.name.trim() || undefined }),
+          }).then(r => r.json() as Promise<ProfileData>)
+        )
+      )
 
-      const finalCompany: CompanyProfile = {
-        id: Date.now().toString(),
-        name: enrichedName,
-        website_url: websiteInput.trim(),
-        description: extractedProfile,
-      }
+      // Build company profiles from results, falling back to user input on failure
+      const enrichedCompanies: CompanyProfile[] = validInputs.map((c, i) => {
+        const data = results[i]
+        const p = data?.profile
+        return {
+          id: (Date.now() + i).toString(),
+          name: p?.company_name || c.name.trim() || c.url.trim(),
+          website_url: c.url.trim(),
+          description: p?.company_description,
+        }
+      })
 
-      // Update display state
-      setCompanyName(enrichedName)
+      // Use the first successful profile for shared fields (focus areas, regions, speaker)
+      const firstSuccess = results.find(r => r.success)?.profile
+      const extractedProfile     = firstSuccess?.company_description || ''
+      const extractedFocusAreas  = Array.isArray(firstSuccess?.focus_areas) ? firstSuccess!.focus_areas.filter(v => VALID_FOCUS_AREAS.includes(v)) : []
+      const extractedRegions     = Array.isArray(firstSuccess?.regions) ? firstSuccess!.regions.filter(v => VALID_REGIONS.includes(v)) : []
+      const extractedSpeakerName = firstSuccess?.speaker_name || ''
+      const socialFound          = results.some(r => r.profile?.social_profiles_found !== false)
+
+      // Update state
+      setCompanies(enrichedCompanies)
+      setCompanyName(enrichedCompanies[0]?.name || '')
       setCustomerProfile(extractedProfile)
       if (extractedFocusAreas.length) setFocusAreas(extractedFocusAreas)
       if (extractedRegions.length)    setRegions(extractedRegions)
       if (extractedSpeakerName)       setSpeakerName(extractedSpeakerName)
-      setCompanies([finalCompany])
       try {
-        setEnrichedFrom(new URL(websiteInput.trim()).hostname.replace(/^www\./, ''))
-      } catch { setEnrichedFrom(websiteInput.trim()) }
+        setEnrichedFrom(new URL(validInputs[0].url.trim()).hostname.replace(/^www\./, ''))
+      } catch { setEnrichedFrom(validInputs[0].url.trim()) }
 
       const payload: EnrichedPayload = {
-        finalCompany,
+        finalCompany: enrichedCompanies[0],
         finalProfile: extractedProfile,
         finalFocusAreas: extractedFocusAreas,
         finalRegions: extractedRegions,
         finalSpeakerName: extractedSpeakerName,
       }
 
-      // Save to DB immediately
+      // Save all companies to DB immediately
       setSaving(true)
       await fetch('/api/settings', {
         method: 'PUT',
@@ -241,19 +250,18 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
         body: JSON.stringify({
           opp_prefs_configured: 'true',
           user_name: yourName.trim(),
-          opp_company_name: finalCompany.name,
+          opp_company_name: enrichedCompanies[0]?.name || '',
           opp_speaker_name: extractedSpeakerName,
           opp_customer_profile: extractedProfile,
           opp_focus_areas: extractedFocusAreas.join(','),
           opp_regions: extractedRegions.join(','),
-          company_profiles: [finalCompany],
+          company_profiles: enrichedCompanies,
         }),
       })
       setSaving(false)
 
       if (isFirstTime) {
         if (!socialFound) {
-          // AI couldn't find social profiles — ask the user (rare)
           setPendingPayload(payload)
           setScreen('social_prompt')
         } else {
@@ -537,32 +545,61 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
             </div>
 
             <div className="px-6 pb-6 space-y-4">
-              <div className="space-y-1">
-                <label className="block text-sm font-medium text-gray-700">Company name</label>
-                <input
-                  type="text"
-                  value={companyNameInput}
-                  onChange={e => setCompanyNameInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') (document.getElementById('website-input') as HTMLInputElement)?.focus() }}
-                  placeholder="Acme Corp"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  disabled={enrichLoading}
-                  autoFocus
-                />
-              </div>
 
-              <div className="space-y-1">
-                <label className="block text-sm font-medium text-gray-700">Company website</label>
-                <input
-                  id="website-input"
-                  type="url"
-                  value={websiteInput}
-                  onChange={e => setWebsiteInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && websiteInput.trim() && !enrichLoading) runEnrich() }}
-                  placeholder="https://acme.com"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              {/* Dynamic company list */}
+              <div className="space-y-3">
+                {companyInputs.map((c, i) => (
+                  <div key={i} className="rounded-xl border border-gray-200 p-3 space-y-2 bg-gray-50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                        {companyInputs.length > 1 ? `Company ${i + 1}` : 'Company'}
+                      </span>
+                      {companyInputs.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeCompanyInput(i)}
+                          disabled={enrichLoading}
+                          className="text-gray-300 hover:text-red-400 transition-colors"
+                          aria-label="Remove"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={c.name}
+                      onChange={e => updateCompanyInput(i, 'name', e.target.value)}
+                      placeholder="Company name"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      disabled={enrichLoading}
+                      autoFocus={i === 0}
+                    />
+                    <input
+                      type="url"
+                      value={c.url}
+                      onChange={e => updateCompanyInput(i, 'url', e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && c.url.trim() && !enrichLoading) runEnrich() }}
+                      placeholder="https://company.com"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      disabled={enrichLoading}
+                    />
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={addCompanyInput}
                   disabled={enrichLoading}
-                />
+                  className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-40 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                  </svg>
+                  Add another company
+                </button>
               </div>
 
               {enrichError && <p className="text-xs text-red-600">{enrichError}</p>}
@@ -574,21 +611,25 @@ export default function SetupPreferencesModal({ onClose, onSaved, closeLabel = '
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                   </svg>
                   <div className="text-center">
-                    <p className="text-sm font-medium text-gray-700">Researching your company…</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Finding LinkedIn, social profiles, and leadership. About 20 seconds.</p>
+                    <p className="text-sm font-medium text-gray-700">
+                      Researching {companyInputs.filter(c => c.url.trim()).length > 1 ? 'your companies' : 'your company'}…
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">Finding LinkedIn, social profiles, and leadership. About 20–30 seconds.</p>
                   </div>
                 </div>
               ) : (
                 <>
                   <button
                     onClick={runEnrich}
-                    disabled={!websiteInput.trim()}
+                    disabled={!companyInputs.some(c => c.url.trim())}
                     className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-3 rounded-xl text-sm font-semibold transition-colors"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/>
                     </svg>
-                    Research my company with AI
+                    Research {companyInputs.filter(c => c.url.trim()).length > 1
+                      ? `${companyInputs.filter(c => c.url.trim()).length} companies`
+                      : 'my company'} with AI
                   </button>
                   <div className="text-center">
                     <button onClick={() => setScreen('form')} className="text-xs text-gray-400 hover:text-gray-600 hover:underline transition-colors">
