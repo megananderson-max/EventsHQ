@@ -211,6 +211,8 @@ function initSchema(db: Database.Database) {
       updated_at DATETIME DEFAULT (datetime('now'))
     )
   `)
+  // Migrate: add name_confirmed to user_tokens so we know if user has set their display name
+  try { db.exec(`ALTER TABLE user_tokens ADD COLUMN name_confirmed INTEGER DEFAULT 0`) } catch {}
   // Migrate: add role column to team_members
   try { db.exec(`ALTER TABLE team_members ADD COLUMN role TEXT DEFAULT 'user'`) } catch {}
   // Migrate: add first_name + last_name to team_members (older DBs)

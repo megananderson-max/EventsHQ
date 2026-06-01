@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
 import { SessionProvider, useSession, signIn, signOut } from 'next-auth/react'
 import SetupPreferencesModal from '@/app/components/SetupPreferencesModal'
+import WelcomeModal from '@/app/components/WelcomeModal'
 
 const DEFAULT_ORDER = ['dashboard', 'events', 'opportunities', 'vendors', 'outcomes', 'my_tasks', 'calendar']
 
@@ -63,6 +64,7 @@ function GripDots() {
 function Sidebar() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const { data: session, status } = useSession()
 
   const [notifCount, setNotifCount] = useState(0)
   const [lastSeenCount, setLastSeenCount] = useState(0)
@@ -73,6 +75,23 @@ function Sidebar() {
   const [showPrefsDropdown, setShowPrefsDropdown] = useState(false)
   const [pendingHideId, setPendingHideId] = useState<string | null>(null)
   const [newOppsCount, setNewOppsCount] = useState(0)
+
+  // Per-user first-login welcome modal
+  const [showWelcome, setShowWelcome] = useState(false)
+  const [googleName, setGoogleName] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (status !== 'authenticated' || !session?.user?.email) return
+    fetch('/api/user/me')
+      .then(r => r.json())
+      .then((data: { nameConfirmed: boolean; name: string | null }) => {
+        if (!data.nameConfirmed) {
+          setGoogleName(data.name)
+          setShowWelcome(true)
+        }
+      })
+      .catch(() => {})
+  }, [status, session?.user?.email])
 
   // Hydration-safe: read localStorage only after mount, then overlay DB nav_order
   useEffect(() => {
@@ -543,6 +562,7 @@ function Sidebar() {
     </aside>
 
     {showSettings && <SetupPreferencesModal onClose={() => setShowSettings(false)} onSaved={() => setShowSettings(false)} />}
+    {showWelcome && <WelcomeModal googleName={googleName} onSaved={() => setShowWelcome(false)} />}
     </>
   )
 }
