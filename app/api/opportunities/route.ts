@@ -344,7 +344,9 @@ Return a JSON array ONLY (no other text, no markdown, just the raw array):
     "speaking_opportunity": "ONLY populate if the event has a genuine keynote sponsorship package, a named lead-sponsor speaking slot, or an open call-for-keynotes that the configured executive speaker's profile credibly fits. Describe the specific slot type and topic angle. Set to null for generic breakout panels, roundtables, or events with no realistic path to a headline speaking role.",
     "networking_value": "Who the executive speaker or team would meet — specific titles and companies, analyst relationships, competitive intelligence opportunities",
     "why_now": "1-2 sentences on why 2026 specifically is the right time for the company to be at this event — market trends, product launches, competitive dynamics",
-    "priority_score": 87
+    "priority_score": 87,
+    "auto_flagged": false,
+    "flag_reason": null
   }
 ]
 
@@ -422,6 +424,30 @@ STEP D — HEALTH SIGNALS: Set event_health based on cross-channel signals:
 
 If a channel has no presence (no Instagram, no YouTube), note that in audience_research_notes — it signals limited reach.
 
+STEP E — AUTO-FLAG REVIEW: After completing Steps A–D, apply this final check to every event and set auto_flagged + flag_reason accordingly:
+
+Set auto_flagged = true and provide a clear flag_reason string for ANY of the following:
+
+  🚫 COMPETITOR-RUN EVENT: The event is organized, owned, or primarily branded by a direct competitor.
+     Examples: Salesforce Dreamforce (Salesforce), Sprinklr Sprinklr Unite, Genesys Xperience, Zendesk Relate, Higher Logic Super Forum, Verint Engage, NICE Interactions.
+     flag_reason format: "Competitor event: organized by [Competitor Name] — attending funds a direct competitor's conference."
+
+  🚫 COMPETITOR DOMINATES SPONSORSHIP: The event's sponsor list is overwhelmingly direct competitors with no room for a differentiated presence.
+     flag_reason format: "Competitor-dominated: [Competitor A], [Competitor B], and [Competitor C] are anchor sponsors — hard to stand out."
+
+  🚫 WRONG AUDIENCE — CONFIRMED: Research confirmed the audience is primarily developers, students, academics, government, or consumer-focused — not enterprise B2B buyers.
+     flag_reason format: "Audience mismatch: confirmed [X]% [developer/student/government] audience — not enterprise CX buyers."
+
+  🚫 SERIOUSLY DECLINING EVENT: event_health = "declining" AND either (a) budget_estimate_low > 20000 OR (b) multiple sources confirm attendance has dropped >30% from peak.
+     flag_reason format: "Declining event: attendance down significantly per [sources] — poor ROI risk at this price point."
+
+  🚫 DNA PATTERN MATCH: The event closely matches a previous "Do Not Attend" decision — same organizer, same format, same city/region, or same stated reason.
+     flag_reason format: "Matches DNA pattern: similar to '[DNA event name]' which was avoided because [reason]."
+
+  ✅ If none of these apply, set auto_flagged = false and flag_reason = null.
+
+IMPORTANT: auto_flagged events should still be included in results — the flag is a warning for human review, NOT an automatic exclusion. The team decides the final call.
+
 Sort by priority_score descending.`
 
     const message = await getClient().messages.create({
@@ -459,8 +485,9 @@ Sort by priority_score descending.`
         strategic_fit, audience_match, recommendation, description,
         organizer, website, past_sponsors, priority_score,
         speaking_opportunity, networking_value, focus_area, region, why_now,
-        relevant_for, audience_research_notes, event_health, status, generated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pipeline', ?)
+        relevant_for, audience_research_notes, event_health,
+        auto_flagged, flag_reason, status, generated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pipeline', ?)
       ON CONFLICT(name) DO UPDATE SET
         start_date=excluded.start_date, end_date=excluded.end_date,
         location=excluded.location, venue=excluded.venue,
@@ -477,6 +504,8 @@ Sort by priority_score descending.`
         why_now=excluded.why_now,
         audience_research_notes=excluded.audience_research_notes,
         event_health=excluded.event_health,
+        auto_flagged=excluded.auto_flagged,
+        flag_reason=excluded.flag_reason,
         relevant_for=CASE WHEN excluded.relevant_for='ignitetech' THEN 'ignitetech' ELSE COALESCE(opportunities.relevant_for, excluded.relevant_for) END,
         generated_at=excluded.generated_at
     `)
@@ -500,6 +529,8 @@ Sort by priority_score descending.`
           opp.relevant_for || null,
           opp.audience_research_notes || null,
           opp.event_health || 'unknown',
+          opp.auto_flagged ? 1 : 0,
+          opp.flag_reason || null,
           now
         )
         added++

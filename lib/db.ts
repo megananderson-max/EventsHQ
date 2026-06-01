@@ -190,6 +190,9 @@ function initSchema(db: Database.Database) {
   // Migrate: audience research enrichment fields on opportunities
   try { db.exec(`ALTER TABLE opportunities ADD COLUMN audience_research_notes TEXT`) } catch {}
   try { db.exec(`ALTER TABLE opportunities ADD COLUMN event_health TEXT`) } catch {}
+  // Migrate: auto-flag fields — set by AI during scanning
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN auto_flagged INTEGER DEFAULT 0`) } catch {}
+  try { db.exec(`ALTER TABLE opportunities ADD COLUMN flag_reason TEXT`) } catch {}
 
   // Workflow documentation — AI-generated, cached in DB
   db.exec(`

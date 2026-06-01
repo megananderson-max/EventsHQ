@@ -39,6 +39,8 @@ interface Opportunity {
   created_at?: string
   is_competitor_event?: number
   competitor_name?: string | null
+  auto_flagged?: number
+  flag_reason?: string | null
   review_notes?: string | null
   dna_notes?: string | null
   approver_name?: string | null
@@ -2053,7 +2055,19 @@ export default function OpportunitiesPage() {
                   : null
                 return (
                   <div key={opp.id ?? i}
-                    className={`bg-white rounded-xl border shadow-sm ${opp.status === 'pending_approval' ? 'border-amber-200' : opp.status === 'do_not_attend' ? 'border-red-200 opacity-80' : 'border-gray-200'}`}>
+                    className={`bg-white rounded-xl border shadow-sm ${opp.auto_flagged ? 'border-amber-300' : opp.status === 'pending_approval' ? 'border-amber-200' : opp.status === 'do_not_attend' ? 'border-red-200 opacity-80' : 'border-gray-200'}`}>
+                    {/* Auto-flag warning banner */}
+                    {!!opp.auto_flagged && opp.flag_reason && (
+                      <div className="flex items-start gap-2 px-4 py-2.5 bg-amber-50 border-b border-amber-200 rounded-t-xl">
+                        <svg className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-amber-800">AI flagged for review — </span>
+                          <span className="text-xs text-amber-700">{opp.flag_reason}</span>
+                        </div>
+                      </div>
+                    )}
                     <div className="p-5">
                       <div className="flex items-start gap-4">
                         <div className="flex-1 min-w-0">
@@ -2228,8 +2242,20 @@ export default function OpportunitiesPage() {
                 </div>
               )}
               {filteredUnderReviewOpps.map(opp => (
-                <div key={opp.id} className="bg-white border-2 border-amber-200 rounded-xl p-5 flex gap-5">
-                  <div className="flex-1 min-w-0">
+                <div key={opp.id} className={`bg-white rounded-xl overflow-hidden ${opp.auto_flagged ? 'border-2 border-amber-400' : 'border-2 border-amber-200'}`}>
+                  {!!opp.auto_flagged && opp.flag_reason && (
+                    <div className="flex items-start gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200">
+                      <svg className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                      </svg>
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-amber-800">AI flagged for review — </span>
+                        <span className="text-xs text-amber-700">{opp.flag_reason}</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="p-5 flex gap-5">
+                    <div className="flex-1 min-w-0">
                     <div className="flex items-start gap-3 flex-wrap mb-2">
                       <h3 className="text-base font-bold text-gray-900">{opp.name}</h3>
                       <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${FIT_COLORS[opp.strategic_fit] || FIT_COLORS.Medium}`}>{opp.strategic_fit} fit</span>
@@ -2341,6 +2367,7 @@ export default function OpportunitiesPage() {
                       Return to Pipeline
                     </button>
                   </div>
+                  </div>{/* closes p-5 flex gap-5 */}
                 </div>
               ))}
             </div>
@@ -2434,8 +2461,7 @@ export default function OpportunitiesPage() {
                     </button>
                   </div>
                 </div>
-              )
-            })}
+              )})}
           </div>
         </div>
       )}
